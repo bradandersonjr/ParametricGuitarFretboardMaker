@@ -75,17 +75,20 @@ _FIRST_RUN_FLAG_FILE = os.path.join(
 
 def _has_shown_welcome():
     """Check if the welcome message has been shown before."""
-    return os.path.isfile(_FIRST_RUN_FLAG_FILE)
+    flag_exists = os.path.isfile(_FIRST_RUN_FLAG_FILE)
+    futil.log(f'{CMD_NAME}: Checking first-run flag at {_FIRST_RUN_FLAG_FILE} — exists: {flag_exists}')
+    return flag_exists
 
 
 def _mark_welcome_shown():
     """Mark that the welcome message has been shown."""
-    os.makedirs(os.path.dirname(_FIRST_RUN_FLAG_FILE), exist_ok=True)
     try:
+        os.makedirs(os.path.dirname(_FIRST_RUN_FLAG_FILE), exist_ok=True)
         Path(_FIRST_RUN_FLAG_FILE).touch()
+        futil.log(f'{CMD_NAME}: Created first-run flag at {_FIRST_RUN_FLAG_FILE}')
     except Exception as e:
         futil.log(f'{CMD_NAME}: Could not create first-run flag: {e}',
-                  adsk.core.LogLevels.WarningLogLevel)
+                  adsk.core.LogLevels.ErrorLogLevel)
 
 
 def start():
@@ -113,13 +116,15 @@ def start():
 
     # Show welcome message only on first run
     if not _has_shown_welcome():
+        futil.log(f'{CMD_NAME}: First run detected — showing welcome message')
         ui.messageBox(
             f'{CMD_NAME} has been added to the SOLID tab under the CREATE drop-down menu.\n\n'
             'Click the button to design custom guitar fretboards with precise parameter control.',
             CMD_NAME
         )
         _mark_welcome_shown()
-        futil.log(f'{CMD_NAME}: Welcome message shown on first run')
+    else:
+        futil.log(f'{CMD_NAME}: Welcome message already shown, skipping')
 
 
 def stop():
