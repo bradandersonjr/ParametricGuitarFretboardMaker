@@ -38,7 +38,7 @@ function ReportSection({
 
 // ── Value row ──────────────────────────────────────────────────────
 
-function ValRow({ label, value, unit = "in", precision = 4 }: { label: string; value: number | null; unit?: string; precision?: number }) {
+function ValRow({ label, value, unit = "", precision = 4 }: { label: string; value: number | null; unit?: string; precision?: number }) {
   return (
     <div className="flex items-center justify-between py-0.5">
       <span className="text-xs text-muted-foreground">{label}</span>
@@ -79,6 +79,7 @@ export function ReportsPage({ payload }: { payload: ModelPayload | null }) {
     return stored ? parseInt(stored) : 4
   })
   const report = useMemo(() => (payload ? buildGuitarReport(payload) : null), [payload])
+  const documentUnit = payload?.documentUnit ?? "in"
 
   const setPrecision = (value: number) => {
     setPrecisionState(value)
@@ -118,21 +119,21 @@ export function ReportsPage({ payload }: { payload: ModelPayload | null }) {
           {/* Scale Length & Multi-Scale */}
           <ReportSection title="Scale Length" icon={Ruler}>
             <div className="space-y-1">
-              <ValRow label="Bass side" value={report.scaleLengthBass} precision={precision} />
-              <ValRow label="Treble side" value={report.scaleLengthTreble} precision={precision} />
+              <ValRow label="Bass side" value={report.scaleLengthBass} unit={documentUnit} precision={precision} />
+              <ValRow label="Treble side" value={report.scaleLengthTreble} unit={documentUnit} precision={precision} />
               {report.isMultiScale && (
                 <>
                   <div className="border-t border-border/50 my-1.5" />
-                  <ValRow label="Scale difference" value={report.scaleDifference} precision={precision} />
+                  <ValRow label="Scale difference" value={report.scaleDifference} unit={documentUnit} precision={precision} />
                   <ValRow label="Neutral fret" value={report.neutralFret} unit="" precision={0} />
-                  <ValRow label="Fretboard length (bass)" value={report.fretboardLengthBass} precision={precision} />
-                  <ValRow label="Fretboard length (treble)" value={report.fretboardLengthTreble} precision={precision} />
+                  <ValRow label="Fretboard length (bass)" value={report.fretboardLengthBass} unit={documentUnit} precision={precision} />
+                  <ValRow label="Fretboard length (treble)" value={report.fretboardLengthTreble} unit={documentUnit} precision={precision} />
                 </>
               )}
               {!report.isMultiScale && (
                 <>
                   <div className="border-t border-border/50 my-1.5" />
-                  <ValRow label="Fretboard length" value={report.fretboardLengthBass} precision={precision} />
+                  <ValRow label="Fretboard length" value={report.fretboardLengthBass} unit={documentUnit} precision={precision} />
                   <div className="text-xs text-muted-foreground/70 italic mt-1">
                     Single-scale (straight frets)
                   </div>
@@ -201,13 +202,13 @@ export function ReportsPage({ payload }: { payload: ModelPayload | null }) {
                 .map((s) => (
                   <div key={s.number} className="flex items-center justify-between py-0.5">
                     <span className="text-xs text-muted-foreground">String {s.number}</span>
-                    <span className="text-xs tabular-nums font-medium">{s.gauge.toFixed(precision)} in</span>
+                    <span className="text-xs tabular-nums font-medium">{s.gauge.toFixed(precision)} {documentUnit}</span>
                   </div>
                 ))}
               <div className="border-t border-border/50 my-1.5" />
-              <ValRow label="String action" value={report.stringAction} precision={precision} />
-              <ValRow label="Nut slot spacing" value={report.nutSlotSpacing} precision={precision} />
-              <ValRow label="Nut spacing (total)" value={report.nutSpacing} precision={precision} />
+              <ValRow label="String action" value={report.stringAction} unit={documentUnit} precision={precision} />
+              <ValRow label="Nut slot spacing" value={report.nutSlotSpacing} unit={documentUnit} precision={precision} />
+              <ValRow label="Nut spacing (total)" value={report.nutSpacing} unit={documentUnit} precision={precision} />
             </div>
           </ReportSection>
 
@@ -215,28 +216,28 @@ export function ReportsPage({ payload }: { payload: ModelPayload | null }) {
           <ReportSection title="Dimensions" icon={Triangle} defaultOpen={false}>
             <div className="space-y-1">
               <div className="text-xs font-semibold text-muted-foreground mt-1 mb-0.5">Overall</div>
-              <ValRow label="Length" value={report.guitarLength} precision={precision} />
-              <ValRow label="Width" value={report.guitarWidth} precision={precision} />
-              <ValRow label="Thickness" value={report.guitarThickness} precision={precision} />
+              <ValRow label="Length" value={report.guitarLength} unit={documentUnit} precision={precision} />
+              <ValRow label="Width" value={report.guitarWidth} unit={documentUnit} precision={precision} />
+              <ValRow label="Thickness" value={report.guitarThickness} unit={documentUnit} precision={precision} />
 
               <div className="border-t border-border/50 my-1.5" />
               <div className="text-xs font-semibold text-muted-foreground mb-0.5">Body</div>
-              <ValRow label="Length" value={report.bodyLength} precision={precision} />
-              <ValRow label="Width" value={report.bodyWidth} precision={precision} />
-              <ValRow label="Thickness" value={report.bodyThickness} precision={precision} />
+              <ValRow label="Length" value={report.bodyLength} unit={documentUnit} precision={precision} />
+              <ValRow label="Width" value={report.bodyWidth} unit={documentUnit} precision={precision} />
+              <ValRow label="Thickness" value={report.bodyThickness} unit={documentUnit} precision={precision} />
 
               <div className="border-t border-border/50 my-1.5" />
               <div className="text-xs font-semibold text-muted-foreground mb-0.5">Neck</div>
-              <ValRow label="Thickness @ 1st fret" value={report.neckThickness1st} precision={precision} />
-              <ValRow label="Thickness @ 12th fret" value={report.neckThickness12th} precision={precision} />
-              <ValRow label="Width @ 1st fret" value={report.neckWidth1st} precision={precision} />
-              <ValRow label="Width @ 12th fret" value={report.neckWidth12th} precision={precision} />
+              <ValRow label="Thickness @ 1st fret" value={report.neckThickness1st} unit={documentUnit} precision={precision} />
+              <ValRow label="Thickness @ 12th fret" value={report.neckThickness12th} unit={documentUnit} precision={precision} />
+              <ValRow label="Width @ 1st fret" value={report.neckWidth1st} unit={documentUnit} precision={precision} />
+              <ValRow label="Width @ 12th fret" value={report.neckWidth12th} unit={documentUnit} precision={precision} />
 
               <div className="border-t border-border/50 my-1.5" />
               <div className="text-xs font-semibold text-muted-foreground mb-0.5">Headstock</div>
-              <ValRow label="Length" value={report.headstockLength} precision={precision} />
-              <ValRow label="Width" value={report.headstockWidth} precision={precision} />
-              <ValRow label="Thickness" value={report.headstockThickness} precision={precision} />
+              <ValRow label="Length" value={report.headstockLength} unit={documentUnit} precision={precision} />
+              <ValRow label="Width" value={report.headstockWidth} unit={documentUnit} precision={precision} />
+              <ValRow label="Thickness" value={report.headstockThickness} unit={documentUnit} precision={precision} />
             </div>
           </ReportSection>
 

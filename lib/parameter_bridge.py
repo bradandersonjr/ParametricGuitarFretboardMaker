@@ -32,15 +32,18 @@ UNIT_SYMBOLS = {
 }
 
 
-def get_unit_symbol(unit_kind):
+def get_unit_symbol(unit_kind, doc_unit='in'):
     """Convert unitKind to a display unit symbol.
 
     Args:
         unit_kind: The unitKind string from schema (e.g., 'length', 'angle', 'unitless').
+        doc_unit: The document unit (e.g., 'in', 'mm'). For 'length' unitKind, this overrides the hardcoded default.
 
     Returns:
-        str: The unit symbol (e.g., 'in', 'deg', '').
+        str: The unit symbol (e.g., 'in', 'mm', 'deg', '').
     """
+    if unit_kind == 'length':
+        return doc_unit
     return UNIT_SYMBOLS.get(unit_kind, '')
 
 
@@ -233,6 +236,11 @@ def build_schema_payload(design: adsk.fusion.Design = None):
 
     doc_unit = get_document_unit(design) if design is not None else 'in'
 
+    # Set the unit for each parameter using the document unit
+    for group in groups:
+        for param in group['parameters']:
+            param['unit'] = get_unit_symbol(param['unitKind'], doc_unit)
+
     payload = {
         'schemaVersion': schema.get('schemaVersion', 'unknown'),
         'templateVersion': schema.get('templateVersion', 'unknown'),
@@ -415,6 +423,89 @@ def get_current_editable_values(design: adsk.fusion.Design):
     return result
 
 
+def _get_param_limits():
+    """Return a dict of {param_name: {min, max}} from the schema.
+
+    Used for validating parameter values against configured limits.
+
+    Returns:
+        dict: { param_name: {'min': num or None, 'max': num or None} }
+    """
+    schema = load_schema()
+    if schema is None:
+        return {}
+
+    limits = {}
+    for group_def in schema.get('groups', []):
+        for param_def in group_def.get('parameters', []):
+            name = param_def['name']
+            limits[name] = {
+                'min': param_def.get('min'),
+                'max': param_def.get('max'),
+            }
+    return limits
+
+
+def _extract_numeric_value(expression_str):
+    """Extract the numeric value from a parameter expression.
+
+    Examples:
+        "25.5 in" → 25.5
+        "24" → 24
+        "( 3 / 16 ) * 1 in" → None (can't extract single number)
+
+    Returns:
+        float or None
+    """
+    import re
+    match = re.search(r'^([\d.-]+)', expression_str.strip())
+    if match:
+        try:
+            return float(match.group(1))
+        except ValueError:
+            return None
+    return None
+
+
+def _validate_parameter_value(name: str, expression_str: str, limits: dict, doc_unit: str = 'in'):
+    """Validate a parameter expression against configured min/max limits.
+
+    Args:
+        name: Parameter name
+        expression_str: The expression string (e.g., "25.5 in")
+        limits: Dict of {param_name: {'min': num or None, 'max': num or None}} — in imperial inches
+        doc_unit: The document unit ('in', 'mm', etc.). If 'mm', limits are scaled by 25.4.
+
+    Returns:
+        str: Error message, or None if valid
+    """
+    if name not in limits:
+        return None  # No limits configured
+
+    limit = limits[name]
+    min_val = limit.get('min')
+    max_val = limit.get('max')
+
+    if min_val is None and max_val is None:
+        return None  # No limits
+
+    numeric_val = _extract_numeric_value(expression_str)
+    if numeric_val is None:
+        return None  # Can't validate; let Fusion handle it
+
+    # Scale limits if document is metric
+    scale = 25.4 if doc_unit == 'mm' else 1.0
+    scaled_min = min_val * scale if min_val is not None else None
+    scaled_max = max_val * scale if max_val is not None else None
+
+    if scaled_min is not None and numeric_val < scaled_min:
+        return f'{name}: value {numeric_val} is below minimum {scaled_min}'
+    if scaled_max is not None and numeric_val > scaled_max:
+        return f'{name}: value {numeric_val} exceeds maximum {scaled_max}'
+
+    return None
+
+
 # ═══════════════════════════════════════════════════════════════════
 # Apply parameters in batch
 # ═══════════════════════════════════════════════════════════════════
@@ -440,10 +531,15 @@ def apply_parameters(design: adsk.fusion.Design, param_values: dict):
     if not param_values:
         return {'updated': 0, 'errors': []}
 
+    # Load parameter limits for validation
+    limits = _get_param_limits()
+    doc_unit = get_document_unit(design)
+
     user_params = design.userParameters
     updated = 0
     errors = []
     protected = 0
+    out_of_range = 0
 
     # Iterate only the incoming changes, not all design params
     for name, new_expr in param_values.items():
@@ -458,6 +554,15 @@ def apply_parameters(design: adsk.fusion.Design, param_values: dict):
                 f'Parameter Bridge: Ignoring protected formula-based parameter: {name}',
                 adsk.core.LogLevels.WarningLogLevel
             )
+            continue
+
+        # Validate against schema limits
+        validation_error = _validate_parameter_value(name, new_expr, limits, doc_unit)
+        if validation_error:
+            out_of_range += 1
+            errors.append(validation_error)
+            futil.log(f'Parameter Bridge: Validation failed: {validation_error}',
+                      adsk.core.LogLevels.WarningLogLevel)
             continue
 
         param = user_params.itemByName(name)
@@ -480,7 +585,7 @@ def apply_parameters(design: adsk.fusion.Design, param_values: dict):
 
     futil.log(
         f'Parameter Bridge: Applied {updated} parameter(s), '
-        f'{protected} protected, {len(errors)} error(s)'
+        f'{protected} protected, {out_of_range} out-of-range, {len(errors)} error(s)'
     )
     return {'updated': updated, 'errors': errors}
 

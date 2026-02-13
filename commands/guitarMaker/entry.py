@@ -460,7 +460,7 @@ def _on_load_template(data_json):
                 'description': param_def.get('description', ''),
                 'expression': expr,
                 'value': numeric_value,
-                'unit': parameter_bridge.get_unit_symbol(unit_kind),
+                'unit': '',  # Will be set below with doc_unit
             })
         groups.append(group)
 
@@ -468,6 +468,11 @@ def _on_load_template(data_json):
 
     design = adsk.fusion.Design.cast(app.activeProduct)
     doc_unit = parameter_bridge.get_document_unit(design) if design else 'in'
+
+    # Now set the unit for each parameter using the document unit
+    for group in groups:
+        for param in group['parameters']:
+            param['unit'] = parameter_bridge.get_unit_symbol(param['unitKind'], doc_unit)
 
     payload = {
         'schemaVersion': schema.get('schemaVersion', 'unknown'),
@@ -600,7 +605,8 @@ def _deferred_apply_handler(args: adsk.core.CustomEventArgs):
 
     # ── Open template on first apply ─────────────────────────────
     if design.userParameters.count == 0:
-        template_file = 'fretboard_imperial.f3d'
+        doc_unit = parameter_bridge.get_document_unit(design)
+        template_file = 'fretboard_metric.f3d' if doc_unit == 'mm' else 'fretboard_imperial.f3d'
         template_path = os.path.join(TEMPLATES_DIR, template_file)
 
         if not os.path.isfile(template_path):

@@ -13,6 +13,8 @@ function UncategorizedSection({
   displayValues,
   originalExpressions,
   onChange,
+  onFocus,
+  onBlur,
   searchQuery,
   parameterMap,
 }: {
@@ -20,6 +22,8 @@ function UncategorizedSection({
   displayValues: Record<string, string>
   originalExpressions: Record<string, string>
   onChange: (name: string, val: string) => void
+  onFocus: (name: string) => void
+  onBlur: (name: string) => void
   searchQuery: string
   parameterMap: Record<string, { unit: string }>
 }) {
@@ -77,6 +81,8 @@ function UncategorizedSection({
                       type="text"
                       value={displayValues[param.name] ?? ""}
                       onChange={(e) => onChange(param.name, e.target.value)}
+                      onFocus={() => onFocus(param.name)}
+                      onBlur={() => onBlur(param.name)}
                       className={[
                         "h-8 w-20 px-2 py-1 rounded-md text-xs text-center tabular-nums",
                         "border bg-background",
@@ -108,19 +114,29 @@ function GroupSection({
   displayValues,
   originalExpressions,
   onChange,
+  onFocus,
+  onBlur,
   defaultOpen,
   searchQuery,
   scaleMode,
   documentUnit,
+  validationErrors,
+  editStartValues,
+  errorFilter,
 }: {
   group: ParameterGroup
   displayValues: Record<string, string>
   originalExpressions: Record<string, string>
   onChange: (name: string, val: string) => void
+  onFocus: (name: string) => void
+  onBlur: (name: string) => void
   defaultOpen: boolean
   searchQuery: string
   scaleMode: "single" | "multi"
   documentUnit: string
+  validationErrors: Record<string, string>
+  editStartValues: Record<string, string>
+  errorFilter: Set<string> | null
 }) {
   const [open, setOpen] = useState(defaultOpen)
 
@@ -129,6 +145,11 @@ function GroupSection({
     // Hide multiscale-only params in single mode
     if (scaleMode === "single" && ["ScaleLengthTreb", "NeutralFret"].includes(p.name)) {
       return false
+    }
+
+    // If showing error filter, only show errored params
+    if (errorFilter !== null) {
+      return errorFilter.has(p.name)
     }
 
     const query = searchQuery.toLowerCase()
@@ -165,6 +186,7 @@ function GroupSection({
           {filteredParams.map((param) => {
             const modified = displayValues[param.name] !== originalExpressions[param.name]
             const displayUnit = param.unit || (param.unitKind === "length" ? documentUnit : param.unitKind === "angle" ? "deg" : "")
+            const hasError = !!validationErrors[param.name]
             return (
               <div
                 key={param.name}
@@ -184,6 +206,10 @@ function GroupSection({
                     {!displayUnit ? (
                       <button
                         onClick={() => {
+                          // Ensure this field has a start value recorded before updating
+                          if (!editStartValues.hasOwnProperty(param.name)) {
+                            onFocus(param.name)
+                          }
                           const val = parseInt(displayValues[param.name] ?? "0")
                           onChange(param.name, Math.max(parseInt(param.min?.toString() ?? "0"), val - 1).toString())
                         }}
@@ -200,20 +226,28 @@ function GroupSection({
                       type="text"
                       value={displayValues[param.name] ?? ""}
                       onChange={(e) => onChange(param.name, e.target.value)}
+                      onFocus={() => onFocus(param.name)}
+                      onBlur={() => onBlur(param.name)}
                       placeholder={param.default}
                       className={[
                         "h-7 px-2 text-xs text-center tabular-nums rounded-lg w-20 shrink-0",
                         "border bg-background",
                         "focus:outline-none",
                         "placeholder:text-muted-foreground/50",
-                        modified
-                          ? "border-amber-500 ring-1 ring-amber-500/50"
-                          : "border-input focus:ring-1 focus:ring-ring",
+                        hasError
+                          ? "border-red-500 ring-1 ring-red-500/50"
+                          : modified
+                            ? "border-amber-500 ring-1 ring-amber-500/50"
+                            : "border-input focus:ring-1 focus:ring-ring",
                       ].join(" ")}
                     />
                     {!displayUnit ? (
                       <button
                         onClick={() => {
+                          // Ensure this field has a start value recorded before updating
+                          if (!editStartValues.hasOwnProperty(param.name)) {
+                            onFocus(param.name)
+                          }
                           const val = parseInt(displayValues[param.name] ?? "0")
                           onChange(param.name, Math.min(parseInt(param.max?.toString() ?? "999"), val + 1).toString())
                         }}
@@ -229,6 +263,11 @@ function GroupSection({
                     )}
                   </div>
                 </div>
+                {hasError && (
+                  <div className="text-xs text-red-500 px-2 mt-1">
+                    {validationErrors[param.name]}
+                  </div>
+                )}
               </div>
             )
           })}
@@ -251,12 +290,16 @@ export function ParametersPage({
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [dismissedWarnings, setDismissedWarnings] = useState<Set<string>>(new Set())
   const [originalExpressions, setOriginalExpressions] = useState<Record<string, string>>({})
-  const [parameterMap, setParameterMap] = useState<Record<string, { unit: string }>>({})
+  const [parameterMap, setParameterMap] = useState<Record<string, { unit: string; min?: number; max?: number }>>({})
+  const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
   const [scaleMode, setScaleMode] = useState<"single" | "multi">("single")
   const [baselineSet, setBaselineSet] = useState(false)
   const [timelineSheetOpen, setTimelineSheetOpen] = useState(false)
+  const [editStartValues, setEditStartValues] = useState<Record<string, string>>({})
+  const [showErrorFilter, setShowErrorFilter] = useState(false)
 
   const isInitial = !payload?.hasFingerprint
+  const documentUnit = payload?.documentUnit ?? "in"
 
   // Reset local state when payload changes
   useEffect(() => {
@@ -264,7 +307,7 @@ export function ParametersPage({
 
     const baseline: Record<string, string> = {}
     const display: Record<string, string> = {}
-    const paramMap: Record<string, { unit: string }> = {}
+    const paramMap: Record<string, { unit: string; min?: number; max?: number }> = {}
 
     for (const group of payload.groups) {
       for (const param of group.parameters) {
@@ -278,7 +321,11 @@ export function ParametersPage({
 
         baseline[param.name] = displayVal
         display[param.name] = displayVal
-        paramMap[param.name] = { unit: param.unit ?? "" }
+        paramMap[param.name] = {
+          unit: param.unit ?? "",
+          min: param.min !== undefined ? param.min : undefined,
+          max: param.max !== undefined ? param.max : undefined,
+        }
       }
     }
 
@@ -316,9 +363,47 @@ export function ParametersPage({
     }
     setParameterMap(paramMap)
     setDisplayValues(display)
+    setEditStartValues({})
+    setValidationErrors({})
     setHistory([])
     setHistoryIndex(-1)
   }, [payload])
+
+  // Re-validate all fields whenever displayValues or parameterMap changes
+  useEffect(() => {
+    const newErrors: Record<string, string> = {}
+    const scale = documentUnit === 'mm' ? 25.4 : 1.0
+
+    for (const [name, value] of Object.entries(displayValues)) {
+      if (!value) continue // Allow empty strings
+
+      const limits = parameterMap[name]
+      if (!limits || (limits.min === undefined && limits.max === undefined)) {
+        continue // No limits defined
+      }
+
+      // Try to parse the numeric part (handle optional minus sign, digits, optional decimal)
+      const numericMatch = value.match(/^-?\d*\.?\d+/)
+      if (!numericMatch) continue // Can't parse as number
+
+      const numValue = parseFloat(numericMatch[0])
+      if (isNaN(numValue)) continue
+
+      const scaledMin = limits.min !== undefined ? limits.min * scale : undefined
+      const scaledMax = limits.max !== undefined ? limits.max * scale : undefined
+
+      if (scaledMin !== undefined && numValue < scaledMin) {
+        newErrors[name] = `Min: ${scaledMin.toFixed(1)}`
+      } else if (scaledMax !== undefined && numValue > scaledMax) {
+        newErrors[name] = `Max: ${scaledMax.toFixed(1)}`
+      }
+    }
+    setValidationErrors(newErrors)
+    if (Object.keys(newErrors).length === 0) {
+      setShowErrorFilter(false)
+    }
+  }, [displayValues, parameterMap, documentUnit])
+
 
   const modifiedCount = payload
     ? Object.entries(displayValues).filter(([name, val]) => {
@@ -331,24 +416,11 @@ export function ParametersPage({
   const hasChanges = modifiedCount > 0
   const canUndo = historyIndex >= 0
   const canRedo = historyIndex < history.length - 1
+  const hasValidationErrors = Object.keys(validationErrors).length > 0
 
   function handleParamChange(name: string, newVal: string) {
-    const oldVal = displayValues[name] ?? ""
-    if (oldVal === newVal) return
-
-    const trimmed = history.slice(0, historyIndex + 1)
-    trimmed.push({ name, oldVal, newVal })
-
-    // In single mode, mirror ScaleLengthBass to ScaleLengthTreb
-    if (scaleMode === "single" && name === "ScaleLengthBass") {
-      const trebOldVal = displayValues["ScaleLengthTreb"] ?? ""
-      trimmed.push({ name: "ScaleLengthTreb", oldVal: trebOldVal, newVal })
-    }
-
-    const maxHistory = 50
-    const capped = trimmed.length > maxHistory ? trimmed.slice(-maxHistory) : trimmed
-    setHistory(capped)
-    setHistoryIndex(capped.length - 1)
+    // Just update display value immediately (for responsive UI)
+    // Validation will happen via useEffect watching displayValues
     setDisplayValues((prev) => {
       const next = { ...prev, [name]: newVal }
       if (scaleMode === "single" && name === "ScaleLengthBass") {
@@ -356,6 +428,59 @@ export function ParametersPage({
       }
       return next
     })
+  }
+
+  function handleParamBlur(name: string) {
+    const currentVal = displayValues[name] ?? ""
+    const startVal = editStartValues[name] ?? originalExpressions[name] ?? ""
+
+    // If no change, don't add to history
+    if (currentVal === startVal) {
+      setEditStartValues((prev) => {
+        const next = { ...prev }
+        delete next[name]
+        return next
+      })
+      return
+    }
+
+    // Commit this edit to history as a single entry
+    const trimmed = history.slice(0, historyIndex + 1)
+    trimmed.push({ name, oldVal: startVal, newVal: currentVal })
+
+    // In single mode, also handle the mirrored scale
+    if (scaleMode === "single" && name === "ScaleLengthBass") {
+      const trebStart = editStartValues["ScaleLengthTreb"] ?? originalExpressions["ScaleLengthTreb"] ?? ""
+      const trebCurrent = displayValues["ScaleLengthTreb"] ?? ""
+      if (trebCurrent !== trebStart) {
+        trimmed.push({ name: "ScaleLengthTreb", oldVal: trebStart, newVal: trebCurrent })
+      }
+    }
+
+    const maxHistory = 50
+    const capped = trimmed.length > maxHistory ? trimmed.slice(-maxHistory) : trimmed
+    setHistory(capped)
+    setHistoryIndex(capped.length - 1)
+
+    // Clear the edit start value for this field
+    setEditStartValues((prev) => {
+      const next = { ...prev }
+      delete next[name]
+      if (name === "ScaleLengthBass") {
+        delete next["ScaleLengthTreb"]
+      }
+      return next
+    })
+  }
+
+  function handleParamFocus(name: string) {
+    // Record the starting value when field is focused
+    if (!editStartValues.hasOwnProperty(name)) {
+      setEditStartValues((prev) => ({
+        ...prev,
+        [name]: displayValues[name] ?? ""
+      }))
+    }
   }
 
   function handleUndo() {
@@ -465,6 +590,22 @@ export function ParametersPage({
           </div>
         </div>
 
+        {/* Error filter banner */}
+        {showErrorFilter && hasValidationErrors && (
+          <div className="px-4 pb-3">
+            <div className="rounded-md border border-red-300 bg-red-50 dark:border-red-800 dark:bg-red-950/40 px-3 py-2 text-xs text-red-800 dark:text-red-200 flex items-center justify-between gap-2">
+              <span>Showing {Object.keys(validationErrors).length} out-of-range parameter{Object.keys(validationErrors).length !== 1 ? "s" : ""}</span>
+              <button
+                onClick={() => setShowErrorFilter(false)}
+                className="p-0.5 hover:bg-red-100 dark:hover:bg-red-900/40 rounded transition-colors shrink-0"
+                title="Show all parameters"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          </div>
+        )}
+
         {/* Status banners */}
         {payload && (isInitial || (payload.missing.length > 0 && !dismissedWarnings.has("missing")) || (payload.extra.length > 0 && !dismissedWarnings.has("extra"))) && (
           <div className="px-4 pb-3 space-y-2">
@@ -515,10 +656,15 @@ export function ParametersPage({
                   displayValues={displayValues}
                   originalExpressions={originalExpressions}
                   onChange={handleParamChange}
+                  onFocus={handleParamFocus}
+                  onBlur={handleParamBlur}
                   defaultOpen={true}
                   searchQuery={searchQuery}
                   scaleMode={scaleMode}
                   documentUnit={payload.documentUnit ?? "in"}
+                  validationErrors={validationErrors}
+                  editStartValues={editStartValues}
+                  errorFilter={showErrorFilter ? new Set(Object.keys(validationErrors)) : null}
                 />
               ))}
 
@@ -529,6 +675,8 @@ export function ParametersPage({
                   displayValues={displayValues}
                   originalExpressions={originalExpressions}
                   onChange={handleParamChange}
+                  onFocus={handleParamFocus}
+                  onBlur={handleParamBlur}
                   searchQuery={searchQuery}
                   parameterMap={parameterMap}
                 />
@@ -552,9 +700,13 @@ export function ParametersPage({
         )}
         <Button
           size="sm"
-          className="flex-1"
-          disabled={!isInitial && !hasChanges}
+          className={`flex-1 ${hasValidationErrors ? "bg-red-500 hover:bg-red-600 text-white" : ""}`}
+          disabled={!hasValidationErrors && (!isInitial && !hasChanges)}
           onClick={() => {
+            if (hasValidationErrors) {
+              setShowErrorFilter(true)
+              return
+            }
             if (isInitial) {
               const changedParams: Record<string, string> = {}
               for (const [name, displayVal] of Object.entries(displayValues)) {
@@ -580,13 +732,15 @@ export function ParametersPage({
             }
           }}
         >
-          {isInitial
-            ? initialChangeCount > 0
-              ? `Import & Apply ${initialChangeCount} change${initialChangeCount !== 1 ? "s" : ""}`
-              : "Import & Apply"
-            : hasChanges
-              ? `Apply ${modifiedCount} change${modifiedCount !== 1 ? "s" : ""}`
-              : "Apply to Model"}
+          {hasValidationErrors
+            ? "Please Fix Input Out of Range"
+            : isInitial
+              ? initialChangeCount > 0
+                ? `Import & Apply ${initialChangeCount} change${initialChangeCount !== 1 ? "s" : ""}`
+                : "Import & Apply"
+              : hasChanges
+                ? `Apply ${modifiedCount} change${modifiedCount !== 1 ? "s" : ""}`
+                : "Apply to Model"}
         </Button>
         <Button
           variant="ghost"
