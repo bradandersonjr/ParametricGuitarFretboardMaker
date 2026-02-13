@@ -433,12 +433,13 @@ def get_current_editable_values(design: adsk.fusion.Design):
 
 
 def _get_param_limits():
-    """Return a dict of {param_name: {min, max, unitKind}} from the schema.
+    """Return a dict of {param_name: {min, max, minMetric, maxMetric, unitKind}} from the schema.
 
     Used for validating parameter values against configured limits.
 
     Returns:
-        dict: { param_name: {'min': num or None, 'max': num or None, 'unitKind': str} }
+        dict: { param_name: {'min': num or None, 'max': num or None, 'minMetric': num or None,
+                             'maxMetric': num or None, 'unitKind': str} }
     """
     schema = load_schema()
     if schema is None:
@@ -451,6 +452,8 @@ def _get_param_limits():
             limits[name] = {
                 'min': param_def.get('min'),
                 'max': param_def.get('max'),
+                'minMetric': param_def.get('minMetric'),
+                'maxMetric': param_def.get('maxMetric'),
                 'unitKind': param_def.get('unitKind', 'unitless'),
             }
     return limits
@@ -483,8 +486,8 @@ def _validate_parameter_value(name: str, expression_str: str, limits: dict, doc_
     Args:
         name: Parameter name
         expression_str: The expression string (e.g., "25.5 in")
-        limits: Dict of {param_name: {'min': num or None, 'max': num or None, 'unitKind': str}}
-        doc_unit: The document unit ('in', 'mm', etc.). If 'mm', limits are scaled by 25.4 for length params.
+        limits: Dict of {param_name: {'min': num, 'max': num, 'minMetric': num, 'maxMetric': num, 'unitKind': str}}
+        doc_unit: The document unit ('in', 'mm', etc.). Uses minMetric/maxMetric for 'mm' documents.
 
     Returns:
         str: Error message, or None if valid
@@ -493,9 +496,19 @@ def _validate_parameter_value(name: str, expression_str: str, limits: dict, doc_
         return None  # No limits configured
 
     limit = limits[name]
-    min_val = limit.get('min')
-    max_val = limit.get('max')
     unit_kind = limit.get('unitKind', 'unitless')
+
+    # Use metric limits for mm documents, imperial limits for others
+    if doc_unit == 'mm' and unit_kind == 'length':
+        min_val = limit.get('minMetric')
+        max_val = limit.get('maxMetric')
+        min_imperial = limit.get('min')
+        max_imperial = limit.get('max')
+    else:
+        min_val = limit.get('min')
+        max_val = limit.get('max')
+        min_imperial = None
+        max_imperial = None
 
     if min_val is None and max_val is None:
         return None  # No limits
@@ -504,22 +517,16 @@ def _validate_parameter_value(name: str, expression_str: str, limits: dict, doc_
     if numeric_val is None:
         return None  # Can't validate; let Fusion handle it
 
-    # Scale limits only for length parameters in metric documents
-    should_scale = unit_kind == 'length' and doc_unit == 'mm'
-    scale = 25.4 if should_scale else 1.0
-    scaled_min = min_val * scale if min_val is not None else None
-    scaled_max = max_val * scale if max_val is not None else None
-
-    if scaled_min is not None and numeric_val < scaled_min:
-        if should_scale:
-            return f'{name}: value {numeric_val} is below minimum {scaled_min:.1f} mm ({min_val:.2f} in)'
+    if min_val is not None and numeric_val < min_val:
+        if min_imperial is not None:
+            return f'{name}: value {numeric_val} is below minimum {min_val} mm ({min_imperial} in)'
         else:
-            return f'{name}: value {numeric_val} is below minimum {scaled_min}'
-    if scaled_max is not None and numeric_val > scaled_max:
-        if should_scale:
-            return f'{name}: value {numeric_val} exceeds maximum {scaled_max:.1f} mm ({max_val:.2f} in)'
+            return f'{name}: value {numeric_val} is below minimum {min_val}'
+    if max_val is not None and numeric_val > max_val:
+        if max_imperial is not None:
+            return f'{name}: value {numeric_val} exceeds maximum {max_val} mm ({max_imperial} in)'
         else:
-            return f'{name}: value {numeric_val} exceeds maximum {scaled_max}'
+            return f'{name}: value {numeric_val} exceeds maximum {max_val}'
 
     return None
 

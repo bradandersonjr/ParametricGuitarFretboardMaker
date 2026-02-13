@@ -11,6 +11,8 @@ export interface Parameter {
   default: string
   min?: number
   max?: number
+  minMetric?: number
+  maxMetric?: number
   step?: number
   description: string
   expression?: string

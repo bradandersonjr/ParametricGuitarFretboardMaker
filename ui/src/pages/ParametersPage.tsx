@@ -290,7 +290,7 @@ export function ParametersPage({
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [dismissedWarnings, setDismissedWarnings] = useState<Set<string>>(new Set())
   const [originalExpressions, setOriginalExpressions] = useState<Record<string, string>>({})
-  const [parameterMap, setParameterMap] = useState<Record<string, { unit: string; unitKind?: string; min?: number; max?: number }>>({})
+  const [parameterMap, setParameterMap] = useState<Record<string, { unit: string; unitKind?: string; min?: number; max?: number; minMetric?: number; maxMetric?: number }>>({})
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
   const [scaleMode, setScaleMode] = useState<"single" | "multi">("single")
   const [baselineSet, setBaselineSet] = useState(false)
@@ -307,7 +307,7 @@ export function ParametersPage({
 
     const baseline: Record<string, string> = {}
     const display: Record<string, string> = {}
-    const paramMap: Record<string, { unit: string; unitKind?: string; min?: number; max?: number }> = {}
+    const paramMap: Record<string, { unit: string; unitKind?: string; min?: number; max?: number; minMetric?: number; maxMetric?: number }> = {}
 
     for (const group of payload.groups) {
       for (const param of group.parameters) {
@@ -326,6 +326,8 @@ export function ParametersPage({
           unitKind: param.unitKind,
           min: param.min !== undefined ? param.min : undefined,
           max: param.max !== undefined ? param.max : undefined,
+          minMetric: param.minMetric !== undefined ? param.minMetric : undefined,
+          maxMetric: param.maxMetric !== undefined ? param.maxMetric : undefined,
         }
       }
     }
@@ -373,13 +375,12 @@ export function ParametersPage({
   // Re-validate all fields whenever displayValues or parameterMap changes
   useEffect(() => {
     const newErrors: Record<string, string> = {}
-    const scale = documentUnit === 'mm' ? 25.4 : 1.0
 
     for (const [name, value] of Object.entries(displayValues)) {
       if (!value) continue // Allow empty strings
 
       const limits = parameterMap[name]
-      if (!limits || (limits.min === undefined && limits.max === undefined)) {
+      if (!limits) {
         continue // No limits defined
       }
 
@@ -390,28 +391,34 @@ export function ParametersPage({
       const numValue = parseFloat(numericMatch[0])
       if (isNaN(numValue)) continue
 
-      // Only scale limits for length parameters (unitKind === 'length')
-      const shouldScale = limits.unitKind === 'length' && documentUnit === 'mm'
-      const scaledMin = limits.min !== undefined ? limits.min * (shouldScale ? scale : 1.0) : undefined
-      const scaledMax = limits.max !== undefined ? limits.max * (shouldScale ? scale : 1.0) : undefined
+      // Use metric limits for mm documents, imperial for others
+      const isLengthInMm = limits.unitKind === 'length' && documentUnit === 'mm'
+      const minVal = isLengthInMm ? limits.minMetric : limits.min
+      const maxVal = isLengthInMm ? limits.maxMetric : limits.max
+      const minImperial = isLengthInMm ? limits.min : undefined
+      const maxImperial = isLengthInMm ? limits.max : undefined
 
-      if (scaledMin !== undefined && numValue < scaledMin) {
+      if (minVal === undefined && maxVal === undefined) {
+        continue // No limits defined for this unit system
+      }
+
+      if (minVal !== undefined && numValue < minVal) {
         // For length params in mm, show both mm and inch values for clarity
-        if (shouldScale && limits.min !== undefined) {
-          const minInches = limits.min.toFixed(2)
-          const minMm = scaledMin.toFixed(1)
-          newErrors[name] = `Min: ${minMm} mm (${minInches} in)`
+        if (minImperial !== undefined) {
+          const minMm = minVal.toFixed(1)
+          const minIn = minImperial.toFixed(2)
+          newErrors[name] = `Min: ${minMm} mm (${minIn} in)`
         } else {
-          newErrors[name] = `Min: ${scaledMin.toFixed(1)}`
+          newErrors[name] = `Min: ${minVal.toFixed(1)}`
         }
-      } else if (scaledMax !== undefined && numValue > scaledMax) {
+      } else if (maxVal !== undefined && numValue > maxVal) {
         // For length params in mm, show both mm and inch values for clarity
-        if (shouldScale && limits.max !== undefined) {
-          const maxInches = limits.max.toFixed(2)
-          const maxMm = scaledMax.toFixed(1)
-          newErrors[name] = `Max: ${maxMm} mm (${maxInches} in)`
+        if (maxImperial !== undefined) {
+          const maxMm = maxVal.toFixed(1)
+          const maxIn = maxImperial.toFixed(2)
+          newErrors[name] = `Max: ${maxMm} mm (${maxIn} in)`
         } else {
-          newErrors[name] = `Max: ${scaledMax.toFixed(1)}`
+          newErrors[name] = `Max: ${maxVal.toFixed(1)}`
         }
       }
     }
