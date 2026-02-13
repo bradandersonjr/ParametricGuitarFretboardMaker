@@ -7,7 +7,8 @@ from .lib import fusionAddInUtils as futil
 
 def run(context):
     try:
-        commands.start()
+        is_startup = context.get('IsApplicationStartup', False)
+        commands.start(is_startup=is_startup)
     except Exception:
         futil.handle_error('run')
 

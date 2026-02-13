@@ -9,9 +9,9 @@ commands = [
 ]
 
 
-def start():
+def start(is_startup=False):
     for command in commands:
-        command.start()
+        command.start(is_startup=is_startup)
 
 
 def stop():

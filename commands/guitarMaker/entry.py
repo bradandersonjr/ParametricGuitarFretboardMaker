@@ -11,8 +11,6 @@ import adsk.fusion
 import os
 import re
 from datetime import date
-from pathlib import Path
-
 from ...lib import fusionAddInUtils as futil
 from ... import config
 from ...lib import parameter_bridge
@@ -66,32 +64,7 @@ local_handlers = []
 _pending_payload = None         # Payload waiting for JS 'ready' signal
 _owner_document = None          # The document that owns the palette
 
-# ── First-run detection ──────────────────────────────────────────────
-_FIRST_RUN_FLAG_FILE = os.path.join(
-    os.environ.get('APPDATA', os.path.expanduser('~')),
-    'ParametricGuitarFretboardMaker', '.first_run_shown'
-)
-
-
-def _has_shown_welcome():
-    """Check if the welcome message has been shown before."""
-    flag_exists = os.path.isfile(_FIRST_RUN_FLAG_FILE)
-    futil.log(f'{CMD_NAME}: Checking first-run flag at {_FIRST_RUN_FLAG_FILE} — exists: {flag_exists}')
-    return flag_exists
-
-
-def _mark_welcome_shown():
-    """Mark that the welcome message has been shown."""
-    try:
-        os.makedirs(os.path.dirname(_FIRST_RUN_FLAG_FILE), exist_ok=True)
-        Path(_FIRST_RUN_FLAG_FILE).touch()
-        futil.log(f'{CMD_NAME}: Created first-run flag at {_FIRST_RUN_FLAG_FILE}')
-    except Exception as e:
-        futil.log(f'{CMD_NAME}: Could not create first-run flag: {e}',
-                  adsk.core.LogLevels.ErrorLogLevel)
-
-
-def start():
+def start(is_startup=False):
     """Register the toolbar button when the add-in starts."""
     cmd_def = ui.commandDefinitions.addButtonDefinition(
         CMD_ID, CMD_NAME, CMD_DESCRIPTION, ICON_FOLDER
@@ -114,17 +87,16 @@ def start():
     timeline_event = app.registerCustomEvent(_TIMELINE_EVENT_ID)
     futil.add_handler(timeline_event, _deferred_timeline_handler)
 
-    # Show welcome message only on first run
-    if not _has_shown_welcome():
-        futil.log(f'{CMD_NAME}: First run detected — showing welcome message')
+    # Show welcome message when manually run, but not on Fusion startup
+    if not is_startup:
         ui.messageBox(
             f'{CMD_NAME} has been added to the SOLID tab under the CREATE drop-down menu.\n\n'
             'Click the button to design custom guitar fretboards with precise parameter control.',
             CMD_NAME
         )
-        _mark_welcome_shown()
+        futil.log(f'{CMD_NAME}: Welcome message shown (manual run)')
     else:
-        futil.log(f'{CMD_NAME}: Welcome message already shown, skipping')
+        futil.log(f'{CMD_NAME}: Skipping welcome message (application startup)')
 
 
 def stop():
