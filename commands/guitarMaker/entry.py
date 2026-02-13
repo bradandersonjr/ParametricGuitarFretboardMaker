@@ -11,6 +11,7 @@ import adsk.fusion
 import os
 import re
 from datetime import date
+from urllib.parse import quote
 from ...lib import fusionAddInUtils as futil
 from ... import config
 from ...lib import parameter_bridge
@@ -54,9 +55,8 @@ USER_TEMPLATES_DIR = os.path.join(
 # ── Palette config ──────────────────────────────────────────────────
 PALETTE_ID = config.PALETTE_ID
 PALETTE_NAME = config.PALETTE_NAME
-PALETTE_LOCAL_URL = 'file:///' + os.path.join(
-    config.ADDIN_ROOT, 'ui_dist', 'index.html'
-).replace('\\', '/')
+_local_path = os.path.join(config.ADDIN_ROOT, 'ui_dist', 'index.html').replace('\\', '/')
+PALETTE_LOCAL_URL = 'file:///' + quote(_local_path, safe='/:')
 PALETTE_URL = config.PALETTE_DEV_URL or PALETTE_LOCAL_URL
 
 # ── State ───────────────────────────────────────────────────────────
