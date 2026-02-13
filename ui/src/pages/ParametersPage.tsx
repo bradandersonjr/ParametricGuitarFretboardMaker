@@ -396,9 +396,23 @@ export function ParametersPage({
       const scaledMax = limits.max !== undefined ? limits.max * (shouldScale ? scale : 1.0) : undefined
 
       if (scaledMin !== undefined && numValue < scaledMin) {
-        newErrors[name] = `Min: ${scaledMin.toFixed(1)}`
+        // For length params in mm, show both mm and inch values for clarity
+        if (shouldScale && limits.min !== undefined) {
+          const minInches = limits.min.toFixed(2)
+          const minMm = scaledMin.toFixed(1)
+          newErrors[name] = `Min: ${minMm} mm (${minInches} in)`
+        } else {
+          newErrors[name] = `Min: ${scaledMin.toFixed(1)}`
+        }
       } else if (scaledMax !== undefined && numValue > scaledMax) {
-        newErrors[name] = `Max: ${scaledMax.toFixed(1)}`
+        // For length params in mm, show both mm and inch values for clarity
+        if (shouldScale && limits.max !== undefined) {
+          const maxInches = limits.max.toFixed(2)
+          const maxMm = scaledMax.toFixed(1)
+          newErrors[name] = `Max: ${maxMm} mm (${maxInches} in)`
+        } else {
+          newErrors[name] = `Max: ${scaledMax.toFixed(1)}`
+        }
       }
     }
     setValidationErrors(newErrors)

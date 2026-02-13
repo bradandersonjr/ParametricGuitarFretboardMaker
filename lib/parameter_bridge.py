@@ -511,9 +511,15 @@ def _validate_parameter_value(name: str, expression_str: str, limits: dict, doc_
     scaled_max = max_val * scale if max_val is not None else None
 
     if scaled_min is not None and numeric_val < scaled_min:
-        return f'{name}: value {numeric_val} is below minimum {scaled_min}'
+        if should_scale:
+            return f'{name}: value {numeric_val} is below minimum {scaled_min:.1f} mm ({min_val:.2f} in)'
+        else:
+            return f'{name}: value {numeric_val} is below minimum {scaled_min}'
     if scaled_max is not None and numeric_val > scaled_max:
-        return f'{name}: value {numeric_val} exceeds maximum {scaled_max}'
+        if should_scale:
+            return f'{name}: value {numeric_val} exceeds maximum {scaled_max:.1f} mm ({max_val:.2f} in)'
+        else:
+            return f'{name}: value {numeric_val} exceeds maximum {scaled_max}'
 
     return None
 
