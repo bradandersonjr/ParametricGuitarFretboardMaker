@@ -424,12 +424,12 @@ def get_current_editable_values(design: adsk.fusion.Design):
 
 
 def _get_param_limits():
-    """Return a dict of {param_name: {min, max}} from the schema.
+    """Return a dict of {param_name: {min, max, unitKind}} from the schema.
 
     Used for validating parameter values against configured limits.
 
     Returns:
-        dict: { param_name: {'min': num or None, 'max': num or None} }
+        dict: { param_name: {'min': num or None, 'max': num or None, 'unitKind': str} }
     """
     schema = load_schema()
     if schema is None:
@@ -442,6 +442,7 @@ def _get_param_limits():
             limits[name] = {
                 'min': param_def.get('min'),
                 'max': param_def.get('max'),
+                'unitKind': param_def.get('unitKind', 'unitless'),
             }
     return limits
 
@@ -473,8 +474,8 @@ def _validate_parameter_value(name: str, expression_str: str, limits: dict, doc_
     Args:
         name: Parameter name
         expression_str: The expression string (e.g., "25.5 in")
-        limits: Dict of {param_name: {'min': num or None, 'max': num or None}} — in imperial inches
-        doc_unit: The document unit ('in', 'mm', etc.). If 'mm', limits are scaled by 25.4.
+        limits: Dict of {param_name: {'min': num or None, 'max': num or None, 'unitKind': str}}
+        doc_unit: The document unit ('in', 'mm', etc.). If 'mm', limits are scaled by 25.4 for length params.
 
     Returns:
         str: Error message, or None if valid
@@ -485,6 +486,7 @@ def _validate_parameter_value(name: str, expression_str: str, limits: dict, doc_
     limit = limits[name]
     min_val = limit.get('min')
     max_val = limit.get('max')
+    unit_kind = limit.get('unitKind', 'unitless')
 
     if min_val is None and max_val is None:
         return None  # No limits
@@ -493,8 +495,9 @@ def _validate_parameter_value(name: str, expression_str: str, limits: dict, doc_
     if numeric_val is None:
         return None  # Can't validate; let Fusion handle it
 
-    # Scale limits if document is metric
-    scale = 25.4 if doc_unit == 'mm' else 1.0
+    # Scale limits only for length parameters in metric documents
+    should_scale = unit_kind == 'length' and doc_unit == 'mm'
+    scale = 25.4 if should_scale else 1.0
     scaled_min = min_val * scale if min_val is not None else None
     scaled_max = max_val * scale if max_val is not None else None
 

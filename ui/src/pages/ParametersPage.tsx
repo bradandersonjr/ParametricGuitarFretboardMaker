@@ -290,7 +290,7 @@ export function ParametersPage({
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [dismissedWarnings, setDismissedWarnings] = useState<Set<string>>(new Set())
   const [originalExpressions, setOriginalExpressions] = useState<Record<string, string>>({})
-  const [parameterMap, setParameterMap] = useState<Record<string, { unit: string; min?: number; max?: number }>>({})
+  const [parameterMap, setParameterMap] = useState<Record<string, { unit: string; unitKind?: string; min?: number; max?: number }>>({})
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
   const [scaleMode, setScaleMode] = useState<"single" | "multi">("single")
   const [baselineSet, setBaselineSet] = useState(false)
@@ -307,7 +307,7 @@ export function ParametersPage({
 
     const baseline: Record<string, string> = {}
     const display: Record<string, string> = {}
-    const paramMap: Record<string, { unit: string; min?: number; max?: number }> = {}
+    const paramMap: Record<string, { unit: string; unitKind?: string; min?: number; max?: number }> = {}
 
     for (const group of payload.groups) {
       for (const param of group.parameters) {
@@ -323,6 +323,7 @@ export function ParametersPage({
         display[param.name] = displayVal
         paramMap[param.name] = {
           unit: param.unit ?? "",
+          unitKind: param.unitKind,
           min: param.min !== undefined ? param.min : undefined,
           max: param.max !== undefined ? param.max : undefined,
         }
@@ -389,8 +390,10 @@ export function ParametersPage({
       const numValue = parseFloat(numericMatch[0])
       if (isNaN(numValue)) continue
 
-      const scaledMin = limits.min !== undefined ? limits.min * scale : undefined
-      const scaledMax = limits.max !== undefined ? limits.max * scale : undefined
+      // Only scale limits for length parameters (unitKind === 'length')
+      const shouldScale = limits.unitKind === 'length' && documentUnit === 'mm'
+      const scaledMin = limits.min !== undefined ? limits.min * (shouldScale ? scale : 1.0) : undefined
+      const scaledMax = limits.max !== undefined ? limits.max * (shouldScale ? scale : 1.0) : undefined
 
       if (scaledMin !== undefined && numValue < scaledMin) {
         newErrors[name] = `Min: ${scaledMin.toFixed(1)}`
