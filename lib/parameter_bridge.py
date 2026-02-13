@@ -236,10 +236,19 @@ def build_schema_payload(design: adsk.fusion.Design = None):
 
     doc_unit = get_document_unit(design) if design is not None else 'in'
 
-    # Set the unit for each parameter using the document unit
+    # Set the unit for each parameter using the document unit, and convert values if needed
     for group in groups:
         for param in group['parameters']:
             param['unit'] = get_unit_symbol(param['unitKind'], doc_unit)
+
+            # If document is metric and parameter is a length, convert defaults from inches to mm
+            if doc_unit == 'mm' and param['unitKind'] == 'length':
+                if param['value'] is not None:
+                    param['value'] = param['value'] * 25.4
+                # Update expression to have the converted value and new unit
+                if param['value'] is not None:
+                    param['expression'] = f"{param['value']} {param['unit']}"
+                    param['default'] = param['expression']
 
     payload = {
         'schemaVersion': schema.get('schemaVersion', 'unknown'),
