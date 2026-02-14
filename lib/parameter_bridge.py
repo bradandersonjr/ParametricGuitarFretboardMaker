@@ -256,8 +256,11 @@ def build_schema_payload(design: adsk.fusion.Design = None):
         'groups': groups,
         'missing': [],
         'extra': [],
+        'extraParams': [],
         'mode': 'initial',
         'documentUnit': doc_unit,
+        'fingerprint': None,
+        'hasFingerprint': False,
     }
 
     futil.log(

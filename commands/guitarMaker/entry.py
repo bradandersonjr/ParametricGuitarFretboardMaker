@@ -474,15 +474,46 @@ def _on_load_template(data_json):
         for param in group['parameters']:
             param['unit'] = parameter_bridge.get_unit_symbol(param['unitKind'], doc_unit)
 
+    # Get fingerprint and extra params from the design (if available)
+    fingerprint = None
+    has_fingerprint = False
+    extra_params = []
+    if design:
+        fingerprint = parameter_bridge.get_fingerprint(design)
+        has_fingerprint = fingerprint is not None and fingerprint != ''
+        # Get extra parameters from the design
+        live_params = parameter_bridge.get_user_parameters(design)
+        schema_param_names = set()
+        for group_def in schema.get('groups', []):
+            for param_def in group_def.get('parameters', []):
+                schema_param_names.add(param_def['name'])
+        extra_names = [name for name in live_params if name not in schema_param_names and name != parameter_bridge.FINGERPRINT_PARAM]
+        for name in extra_names:
+            live = live_params[name]
+            extra_params.append({
+                'name': name,
+                'label': name,
+                'unitKind': 'unitless',
+                'controlType': 'number',
+                'default': '',
+                'description': live.get('comment', ''),
+                'expression': live['expression'],
+                'value': live['value'],
+                'unit': live['unit'],
+            })
+
     payload = {
         'schemaVersion': schema.get('schemaVersion', 'unknown'),
         'templateVersion': schema.get('templateVersion', 'unknown'),
         'groups': groups,
         'missing': [],
-        'extra': [],
+        'extra': [p['name'] for p in extra_params],
+        'extraParams': extra_params,
         'mode': 'template',
         'templateName': template.get('name', ''),
         'documentUnit': doc_unit,
+        'fingerprint': fingerprint,
+        'hasFingerprint': has_fingerprint,
     }
 
     palette = ui.palettes.itemById(PALETTE_ID)
