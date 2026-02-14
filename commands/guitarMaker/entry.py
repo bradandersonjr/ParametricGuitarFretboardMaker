@@ -406,120 +406,130 @@ def _on_load_template(data_json):
                   adsk.core.LogLevels.ErrorLogLevel)
         return
 
-    template_id = data.get('id', '')
-    is_readonly = data.get('readonly', False)
+    try:
+        template_id = data.get('id', '')
+        is_readonly = data.get('readonly', False)
 
-    safe_id = os.path.basename(template_id)
-    base_dir = PRESETS_DIR if is_readonly else USER_TEMPLATES_DIR
-    filepath = os.path.join(base_dir, f'{safe_id}.json')
+        safe_id = os.path.basename(template_id)
+        base_dir = PRESETS_DIR if is_readonly else USER_TEMPLATES_DIR
+        filepath = os.path.join(base_dir, f'{safe_id}.json')
 
-    if not os.path.isfile(filepath):
-        futil.log(f'{CMD_NAME}: LOAD_TEMPLATE — file not found: {filepath}',
-                  adsk.core.LogLevels.WarningLogLevel)
-        return
+        if not os.path.isfile(filepath):
+            futil.log(f'{CMD_NAME}: LOAD_TEMPLATE — file not found: {filepath}',
+                      adsk.core.LogLevels.WarningLogLevel)
+            return
 
-    template = _load_template_file(filepath)
-    if not template:
-        return
+        template = _load_template_file(filepath)
+        if not template:
+            return
 
-    parameters = template.get('parameters', {})
+        parameters = template.get('parameters', {})
 
-    # Build a model-state payload using schema defaults merged with template values
-    pb = parameter_bridge
-    schema = pb.load_schema()
-    if schema is None:
-        return
+        # Build a model-state payload using schema defaults merged with template values
+        pb = parameter_bridge
+        schema = pb.load_schema()
+        if schema is None:
+            return
 
-    groups = []
-    for group_def in schema.get('groups', []):
-        group = {
-            'id': group_def['id'],
-            'label': group_def['label'],
-            'order': group_def.get('order', 0),
-            'parameters': [],
-        }
-        for param_def in group_def.get('parameters', []):
-            if not param_def.get('editable', True):
-                continue
-            name = param_def['name']
-            expr = parameters.get(name, param_def.get('default', ''))
-            try:
-                numeric_value = float(expr) if expr else None
-            except (ValueError, TypeError):
-                numeric_value = None
-            unit_kind = param_def.get('unitKind', 'length')
-            group['parameters'].append({
-                'name': name,
-                'label': param_def.get('label', name),
-                'unitKind': unit_kind,
-                'controlType': param_def.get('controlType', 'number'),
-                'default': param_def.get('default', ''),
-                'min': param_def.get('min'),
-                'max': param_def.get('max'),
-                'step': param_def.get('step'),
-                'description': param_def.get('description', ''),
-                'expression': expr,
-                'value': numeric_value,
-                'unit': '',  # Will be set below with doc_unit
-            })
-        groups.append(group)
-
-    groups.sort(key=lambda g: g['order'])
-
-    design = adsk.fusion.Design.cast(app.activeProduct)
-    doc_unit = parameter_bridge.get_document_unit(design) if design else 'in'
-
-    # Now set the unit for each parameter using the document unit
-    for group in groups:
-        for param in group['parameters']:
-            param['unit'] = parameter_bridge.get_unit_symbol(param['unitKind'], doc_unit)
-
-    # Get fingerprint and extra params from the design (if available)
-    fingerprint = None
-    has_fingerprint = False
-    extra_params = []
-    if design:
-        fingerprint = parameter_bridge.get_fingerprint(design)
-        has_fingerprint = fingerprint is not None and fingerprint != ''
-        # Get extra parameters from the design
-        live_params = parameter_bridge.get_user_parameters(design)
-        schema_param_names = set()
+        groups = []
         for group_def in schema.get('groups', []):
+            group = {
+                'id': group_def['id'],
+                'label': group_def['label'],
+                'order': group_def.get('order', 0),
+                'parameters': [],
+            }
             for param_def in group_def.get('parameters', []):
-                schema_param_names.add(param_def['name'])
-        extra_names = [name for name in live_params if name not in schema_param_names and name != parameter_bridge.FINGERPRINT_PARAM]
-        for name in extra_names:
-            live = live_params[name]
-            extra_params.append({
-                'name': name,
-                'label': name,
-                'unitKind': 'unitless',
-                'controlType': 'number',
-                'default': '',
-                'description': live.get('comment', ''),
-                'expression': live['expression'],
-                'value': live['value'],
-                'unit': live['unit'],
-            })
+                if not param_def.get('editable', True):
+                    continue
+                name = param_def['name']
+                expr = parameters.get(name, param_def.get('default', ''))
+                try:
+                    numeric_value = float(expr) if expr else None
+                except (ValueError, TypeError):
+                    numeric_value = None
+                unit_kind = param_def.get('unitKind', 'length')
+                group['parameters'].append({
+                    'name': name,
+                    'label': param_def.get('label', name),
+                    'unitKind': unit_kind,
+                    'controlType': param_def.get('controlType', 'number'),
+                    'default': param_def.get('default', ''),
+                    'min': param_def.get('min'),
+                    'max': param_def.get('max'),
+                    'minMetric': param_def.get('minMetric'),
+                    'maxMetric': param_def.get('maxMetric'),
+                    'step': param_def.get('step'),
+                    'description': param_def.get('description', ''),
+                    'expression': expr,
+                    'value': numeric_value,
+                    'unit': '',  # Will be set below with doc_unit
+                })
+            groups.append(group)
 
-    payload = {
-        'schemaVersion': schema.get('schemaVersion', 'unknown'),
-        'templateVersion': schema.get('templateVersion', 'unknown'),
-        'groups': groups,
-        'missing': [],
-        'extra': [p['name'] for p in extra_params],
-        'extraParams': extra_params,
-        'mode': 'template',
-        'templateName': template.get('name', ''),
-        'documentUnit': doc_unit,
-        'fingerprint': fingerprint,
-        'hasFingerprint': has_fingerprint,
-    }
+        groups.sort(key=lambda g: g['order'])
 
-    palette = ui.palettes.itemById(PALETTE_ID)
-    if palette:
-        palette.sendInfoToHTML('PUSH_MODEL_STATE', json.dumps(payload))
-    futil.log(f'{CMD_NAME}: Loaded template "{template.get("name")}" ({len(parameters)} params)')
+        design = adsk.fusion.Design.cast(app.activeProduct)
+        doc_unit = parameter_bridge.get_document_unit(design) if design else 'in'
+
+        # Now set the unit for each parameter using the document unit
+        for group in groups:
+            for param in group['parameters']:
+                param['unit'] = parameter_bridge.get_unit_symbol(param['unitKind'], doc_unit)
+
+        # Get fingerprint and extra params from the design (if available)
+        fingerprint = None
+        has_fingerprint = False
+        extra_params = []
+        if design:
+            fingerprint = parameter_bridge.get_fingerprint(design)
+            has_fingerprint = fingerprint is not None and fingerprint != ''
+            # Get extra parameters from the design
+            live_params = parameter_bridge.get_user_parameters(design)
+            schema_param_names = set()
+            for group_def in schema.get('groups', []):
+                for param_def in group_def.get('parameters', []):
+                    schema_param_names.add(param_def['name'])
+            extra_names = [name for name in live_params if name not in schema_param_names and name != parameter_bridge.FINGERPRINT_PARAM]
+            for name in extra_names:
+                live = live_params[name]
+                extra_params.append({
+                    'name': name,
+                    'label': name,
+                    'unitKind': 'unitless',
+                    'controlType': 'number',
+                    'default': '',
+                    'description': live.get('comment', ''),
+                    'expression': live['expression'],
+                    'value': live['value'],
+                    'unit': live['unit'],
+                })
+
+        payload = {
+            'schemaVersion': schema.get('schemaVersion', 'unknown'),
+            'templateVersion': schema.get('templateVersion', 'unknown'),
+            'groups': groups,
+            'missing': [],
+            'extra': [p['name'] for p in extra_params],
+            'extraParams': extra_params,
+            'mode': 'template',
+            'templateName': template.get('name', ''),
+            'documentUnit': doc_unit,
+            'fingerprint': fingerprint,
+            'hasFingerprint': has_fingerprint,
+        }
+
+        palette = ui.palettes.itemById(PALETTE_ID)
+        if palette:
+            palette.sendInfoToHTML('PUSH_MODEL_STATE', json.dumps(payload))
+        futil.log(f'{CMD_NAME}: Loaded template "{template.get("name")}" ({len(parameters)} params)')
+
+    except Exception as e:
+        futil.log(f'{CMD_NAME}: LOAD_TEMPLATE error: {e}',
+                  adsk.core.LogLevels.ErrorLogLevel)
+        import traceback
+        futil.log(f'{CMD_NAME}: {traceback.format_exc()}',
+                  adsk.core.LogLevels.ErrorLogLevel)
 
 
 def palette_incoming(args: adsk.core.HTMLEventArgs):
@@ -556,6 +566,15 @@ def palette_incoming(args: adsk.core.HTMLEventArgs):
 
     elif action == 'LOAD_TEMPLATE':
         _on_load_template(args.data)
+
+    elif action == 'SET_PARAM_CATEGORY':
+        _on_set_param_category(args.data)
+
+    elif action == 'EDIT_PARAM':
+        _on_edit_param(args.data)
+
+    elif action == 'DELETE_PARAM':
+        _on_delete_param(args.data)
 
     elif action == 'GET_TIMELINE_ITEMS':
         _on_get_timeline_items()
@@ -601,15 +620,24 @@ def _on_apply_params(data_json):
 
     Immediately sends COMPUTING to JS so it can repaint, then fires a
     custom event to do the actual work on the next Fusion event loop tick.
+
+    Accepts both the legacy flat format { param: expr } and the new structured
+    format { updates: { param: expr }, creates: [{ name, expression, description }] }.
     """
     global _pending_apply
 
     try:
-        _pending_apply = json.loads(data_json)
+        data = json.loads(data_json)
     except Exception as e:
         futil.log(f'{CMD_NAME}: Bad APPLY_PARAMS data: {e}',
                   adsk.core.LogLevels.ErrorLogLevel)
         return
+
+    # Normalise to structured format — support legacy flat dict from older UI builds
+    if isinstance(data, dict) and ('updates' in data or 'creates' in data):
+        _pending_apply = data  # already structured
+    else:
+        _pending_apply = {'updates': data, 'creates': []}  # wrap legacy flat format
 
     # Tell the UI we're working — it can repaint now before we block
     palette = ui.palettes.itemById(PALETTE_ID)
@@ -624,11 +652,20 @@ def _deferred_apply_handler(args: adsk.core.CustomEventArgs):
     """Runs on the next Fusion event loop tick — does the actual apply work."""
     global _pending_apply, _owner_document
 
-    param_values = _pending_apply
+    pending = _pending_apply
     _pending_apply = None
 
-    if param_values is None:
+    if pending is None:
         return
+
+    # Extract updates and creates from the structured payload
+    # Support legacy flat dict (pre-create-param feature) as well
+    if isinstance(pending, dict) and ('updates' in pending or 'creates' in pending):
+        param_values = pending.get('updates', {}) or {}
+        creates = pending.get('creates', []) or []
+    else:
+        param_values = pending  # legacy flat format
+        creates = []
 
     design = adsk.fusion.Design.cast(app.activeProduct)
     if not design:
@@ -664,10 +701,80 @@ def _deferred_apply_handler(args: adsk.core.CustomEventArgs):
         parameter_bridge.set_fingerprint(design)
 
     # ── Apply parameter changes ───────────────────────────────────
-    result = parameter_bridge.apply_parameters(design, param_values)
+    result = parameter_bridge.apply_parameters(design, param_values, creates=creates)
     futil.log(f'{CMD_NAME}: Apply result: {result}')
 
     # Push updated live state back to the UI
+    _on_refresh_request()
+
+
+def _on_set_param_category(data_json):
+    """Update the group assignment for a user parameter (extra/custom param)."""
+    try:
+        data = json.loads(data_json)
+    except Exception as e:
+        futil.log(f'{CMD_NAME}: Bad SET_PARAM_CATEGORY data: {e}',
+                  adsk.core.LogLevels.ErrorLogLevel)
+        return
+
+    param_name = data.get('name', '')
+    group_id = data.get('groupId', '')
+
+    design = adsk.fusion.Design.cast(app.activeProduct)
+    if not design:
+        return
+
+    result = parameter_bridge.set_param_group(design, param_name, group_id)
+    futil.log(f'{CMD_NAME}: SET_PARAM_CATEGORY {param_name!r} -> {group_id!r}: {result}')
+
+    # Refresh UI with updated state
+    _on_refresh_request()
+
+
+def _on_edit_param(data_json):
+    """Rename a user parameter, update its description, and/or change its group."""
+    try:
+        data = json.loads(data_json)
+    except Exception as e:
+        futil.log(f'{CMD_NAME}: Bad EDIT_PARAM data: {e}',
+                  adsk.core.LogLevels.ErrorLogLevel)
+        return
+
+    old_name = data.get('oldName', '')
+    new_name = data.get('newName', old_name)
+    description = data.get('description', '')
+    group_id = data.get('groupId', '')
+
+    design = adsk.fusion.Design.cast(app.activeProduct)
+    if not design:
+        return
+
+    result = parameter_bridge.edit_param(design, old_name, new_name, description, group_id)
+    futil.log(f'{CMD_NAME}: EDIT_PARAM {old_name!r} -> {new_name!r}: {result}')
+
+    # Refresh UI with updated state
+    _on_refresh_request()
+
+
+def _on_delete_param(data_json):
+    """Delete a user parameter from the design."""
+    try:
+        data = json.loads(data_json)
+    except Exception as e:
+        futil.log(f'{CMD_NAME}: Bad DELETE_PARAM data: {e}',
+                  adsk.core.LogLevels.ErrorLogLevel)
+        return
+
+    param_name = data.get('name', '')
+
+    design = adsk.fusion.Design.cast(app.activeProduct)
+    if not design:
+        return
+
+    result = parameter_bridge.delete_param(design, param_name)
+    futil.log(f'{CMD_NAME}: DELETE_PARAM {param_name!r}: {result}')
+
+    # Refresh UI with updated state
     _on_refresh_request()
 
 

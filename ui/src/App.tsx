@@ -4,6 +4,7 @@ import { AppSidebar } from "@/components/AppSidebar"
 import { AnnouncementBar } from "@/components/AnnouncementBar"
 import { VersionHeader } from "@/components/VersionHeader"
 import { BetaDisclaimer } from "@/components/BetaDisclaimer"
+import { ErrorBoundary } from "@/components/ErrorBoundary"
 import { useModelPayload } from "@/hooks/useModelPayload"
 import { useVersionCheck } from "@/hooks/useVersionCheck"
 import { ParametersPage } from "@/pages/ParametersPage"
@@ -32,45 +33,47 @@ function App() {
 
 
   return (
-    <SidebarProvider defaultOpen={false}>
-      {showBetaDisclaimer && (
-        <BetaDisclaimer onAccept={() => setShowBetaDisclaimer(false)} />
-      )}
-      <div className="flex h-screen w-full bg-background text-foreground">
-        <AppSidebar
-          activePage={activePage}
-          onPageChange={setActivePage}
-          connected={connected}
-        />
+    <ErrorBoundary>
+      <SidebarProvider defaultOpen={false}>
+        {showBetaDisclaimer && (
+          <BetaDisclaimer onAccept={() => setShowBetaDisclaimer(false)} />
+        )}
+        <div className="flex h-screen w-full bg-background text-foreground">
+          <AppSidebar
+            activePage={activePage}
+            onPageChange={setActivePage}
+            connected={connected}
+          />
 
-        <SidebarInset className="flex flex-col min-w-0">
-          {/* Sidebar toggle + app name + version */}
-          <div className="flex items-center justify-between px-2 pt-1 shrink-0">
-            <SidebarTrigger className="-ml-0.5" />
-            <div className="flex items-center gap-2">
-              <span className="text-sm font-semibold text-muted-foreground font-heading">Parametric Guitar: Fretboard Maker</span>
-              <VersionHeader version={versionInfo.current} isOutdated={versionInfo.isOutdated} />
+          <SidebarInset className="flex flex-col min-w-0">
+            {/* Sidebar toggle + app name + version */}
+            <div className="flex items-center justify-between px-2 pt-1 shrink-0">
+              <SidebarTrigger className="-ml-0.5" />
+              <div className="flex items-center gap-2">
+                <span className="text-sm font-semibold text-muted-foreground font-heading">Parametric Guitar: Fretboard Maker</span>
+                <VersionHeader version={versionInfo.current} isOutdated={versionInfo.isOutdated} />
+              </div>
             </div>
-          </div>
 
-          <AnnouncementBar />
+            <AnnouncementBar />
 
-          {/* Pages — ParametersPage is always mounted (hidden) to preserve edit state */}
-          <div className={activePage === "parameters" ? "flex flex-col flex-1 min-h-0" : "hidden"}>
-            <ParametersPage payload={payload} />
-          </div>
-          {activePage === "templates" && (
-            <TemplatesPage payload={payload} templateList={templateList} onTemplateLoaded={() => setActivePage("parameters")} />
-          )}
-          {activePage === "reports" && <ReportsPage payload={payload} />}
-          {activePage === "changelog" && <ChangelogPage />}
-          {activePage === "help" && <HelpPage />}
-          {activePage === "community" && <CommunityPage />}
-          {activePage === "support" && <SupportPage />}
-          {activePage === "about" && <AboutPage version={versionInfo.current} />}
-        </SidebarInset>
-      </div>
-    </SidebarProvider>
+            {/* Pages — ParametersPage is always mounted (hidden) to preserve edit state */}
+            <div className={activePage === "parameters" ? "flex flex-col flex-1 min-h-0" : "hidden"}>
+              <ParametersPage payload={payload} />
+            </div>
+            {activePage === "templates" && (
+              <TemplatesPage payload={payload} templateList={templateList} onTemplateLoaded={() => setActivePage("parameters")} />
+            )}
+            {activePage === "reports" && <ReportsPage payload={payload} />}
+            {activePage === "changelog" && <ChangelogPage />}
+            {activePage === "help" && <HelpPage />}
+            {activePage === "community" && <CommunityPage />}
+            {activePage === "support" && <SupportPage />}
+            {activePage === "about" && <AboutPage version={versionInfo.current} />}
+          </SidebarInset>
+        </div>
+      </SidebarProvider>
+    </ErrorBoundary>
   )
 }
 

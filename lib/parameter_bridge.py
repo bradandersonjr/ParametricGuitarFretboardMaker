@@ -149,6 +149,127 @@ def set_fingerprint(design: adsk.fusion.Design):
 # Read user parameters from the active design
 # ═══════════════════════════════════════════════════════════════════
 
+# ═══════════════════════════════════════════════════════════════════
+# Parameter group tag helpers
+# ═══════════════════════════════════════════════════════════════════
+
+_GROUP_TAG_RE = None
+
+def _group_tag_re():
+    global _GROUP_TAG_RE
+    if _GROUP_TAG_RE is None:
+        import re
+        _GROUP_TAG_RE = re.compile(r'\s*\[pgfm-group:([^\]]+)\]')
+    return _GROUP_TAG_RE
+
+
+def _parse_group_tag(comment: str):
+    """Extract the pgfm-group value from a parameter comment string.
+
+    Returns the group id string (e.g. 'fretboard') or None if not present.
+    """
+    match = _group_tag_re().search(comment or '')
+    return match.group(1) if match else None
+
+
+def _set_group_tag(comment: str, group_id: str) -> str:
+    """Set or replace the pgfm-group tag in a comment string.
+
+    If group_id is None or empty, removes the tag entirely.
+    """
+    # Remove any existing tag first
+    clean = _group_tag_re().sub('', comment or '').rstrip()
+    if group_id:
+        return f'{clean} [pgfm-group:{group_id}]'.lstrip()
+    return clean
+
+
+def set_param_group(design: adsk.fusion.Design, param_name: str, group_id: str) -> dict:
+    """Update a user parameter's comment to encode its group assignment.
+
+    Args:
+        design: The active Fusion design.
+        param_name: Name of the user parameter to update.
+        group_id: Schema group id (e.g. 'fretboard') or '' to remove assignment.
+
+    Returns:
+        dict: { "ok": bool, "error": str or None }
+    """
+    param = design.userParameters.itemByName(param_name)
+    if param is None:
+        return {'ok': False, 'error': f"Parameter '{param_name}' not found"}
+    try:
+        param.comment = _set_group_tag(param.comment, group_id)
+        futil.log(f'Parameter Bridge: Set group for {param_name} -> {group_id!r}')
+        return {'ok': True, 'error': None}
+    except Exception as e:
+        err = f'Failed to set group for {param_name}: {e}'
+        futil.log(err, adsk.core.LogLevels.ErrorLogLevel)
+        return {'ok': False, 'error': err}
+
+
+def edit_param(design: adsk.fusion.Design, old_name: str, new_name: str, description: str, group_id: str) -> dict:
+    """Rename a user parameter, update its description, and set its group assignment.
+
+    Args:
+        design: The active Fusion design.
+        old_name: Current parameter name.
+        new_name: Desired new name (may be same as old_name if not renaming).
+        description: New description/comment text (without the group tag).
+        group_id: Schema group id or '' to remove assignment.
+
+    Returns:
+        dict: { "ok": bool, "error": str or None }
+    """
+    param = design.userParameters.itemByName(old_name)
+    if param is None:
+        return {'ok': False, 'error': f"Parameter '{old_name}' not found"}
+
+    # Check for name conflict only if actually renaming
+    if new_name != old_name:
+        if design.userParameters.itemByName(new_name) is not None:
+            return {'ok': False, 'error': f"A parameter named '{new_name}' already exists"}
+
+    try:
+        # Build comment: user description + pgfm group tag
+        new_comment = _set_group_tag(description, group_id)
+        param.comment = new_comment
+
+        # Rename last to avoid potential conflicts during comment write
+        if new_name != old_name:
+            param.name = new_name
+
+        futil.log(f'Parameter Bridge: Edited param {old_name!r} -> name={new_name!r} group={group_id!r}')
+        return {'ok': True, 'error': None}
+    except Exception as e:
+        err = f'Failed to edit param {old_name}: {e}'
+        futil.log(err, adsk.core.LogLevels.ErrorLogLevel)
+        return {'ok': False, 'error': err}
+
+
+def delete_param(design: adsk.fusion.Design, param_name: str) -> dict:
+    """Delete a user parameter from the design.
+
+    Args:
+        design: The active Fusion design.
+        param_name: Name of the user parameter to delete.
+
+    Returns:
+        dict: { "ok": bool, "error": str or None }
+    """
+    param = design.userParameters.itemByName(param_name)
+    if param is None:
+        return {'ok': False, 'error': f"Parameter '{param_name}' not found"}
+    try:
+        param.deleteMe()
+        futil.log(f'Parameter Bridge: Deleted user parameter {param_name!r}')
+        return {'ok': True, 'error': None}
+    except Exception as e:
+        err = f'Failed to delete param {param_name}: {e}'
+        futil.log(err, adsk.core.LogLevels.ErrorLogLevel)
+        return {'ok': False, 'error': err}
+
+
 def get_user_parameters(design: adsk.fusion.Design):
     """Read all user parameters from the active design.
 
@@ -224,6 +345,8 @@ def build_schema_payload(design: adsk.fusion.Design = None):
                 'default': default_expr,
                 'min': param_def.get('min'),
                 'max': param_def.get('max'),
+                'minMetric': param_def.get('minMetric'),
+                'maxMetric': param_def.get('maxMetric'),
                 'step': param_def.get('step'),
                 'description': param_def.get('description', ''),
                 'expression': default_expr,
@@ -350,6 +473,8 @@ def build_ui_payload(design: adsk.fusion.Design):
                 'default': param_def.get('default', ''),
                 'min': param_def.get('min'),
                 'max': param_def.get('max'),
+                'minMetric': param_def.get('minMetric'),
+                'maxMetric': param_def.get('maxMetric'),
                 'step': param_def.get('step'),
                 'description': param_def.get('description', ''),
                 'expression': live['expression'],
@@ -368,20 +493,28 @@ def build_ui_payload(design: adsk.fusion.Design):
     extra_names = [name for name in live_params if name not in schema_param_names and name != FINGERPRINT_PARAM]
 
     # Build full parameter objects for extra params
+    # Parse group tag from comment so UI can route the param to the right section
     extra_params = []
     for name in extra_names:
         live = live_params[name]
-        extra_params.append({
+        raw_comment = live['comment']
+        group_id = _parse_group_tag(raw_comment)
+        # Strip the tag from the visible description
+        clean_description = _group_tag_re().sub('', raw_comment).strip()
+        entry = {
             'name': name,
             'label': name,
             'unitKind': 'unitless',
             'controlType': 'number',
             'default': '',
-            'description': live['comment'],
+            'description': clean_description,
             'expression': live['expression'],
             'value': live['value'],
             'unit': live['unit'],
-        })
+        }
+        if group_id:
+            entry['group'] = group_id
+        extra_params.append(entry)
 
     # Check for fingerprint
     fingerprint = get_fingerprint(design)
@@ -535,29 +668,82 @@ def _validate_parameter_value(name: str, expression_str: str, limits: dict, doc_
 
 
 # ═══════════════════════════════════════════════════════════════════
+# Create new user parameters
+# ═══════════════════════════════════════════════════════════════════
+
+def _extract_unit_from_expression(expression: str) -> str:
+    """Extract the unit suffix from an expression string.
+
+    Examples:
+        "12.5 in" -> "in"
+        "45 deg"  -> "deg"
+        "6"       -> ""
+    """
+    import re
+    match = re.search(r'\b(in|mm|cm|deg)\s*$', expression.strip())
+    return match.group(1) if match else ''
+
+
+def create_user_parameter(design: adsk.fusion.Design, name: str, expression: str,
+                          description: str = '', group_id: str = '') -> dict:
+    """Create a new user parameter in the Fusion design.
+
+    Args:
+        design: The active Fusion design.
+        name: Parameter name (must be a valid Fusion identifier).
+        expression: Expression string (e.g. "12.5 in" or "6").
+        description: Optional human-readable comment string.
+        group_id: Optional schema group id to embed as a group tag in the comment.
+
+    Returns:
+        dict: { "created": bool, "error": str or None }
+    """
+    user_params = design.userParameters
+
+    # Check for duplicate
+    if user_params.itemByName(name) is not None:
+        return {'created': False, 'error': f"Parameter '{name}' already exists"}
+
+    try:
+        value_input = adsk.core.ValueInput.createByString(expression)
+        unit = _extract_unit_from_expression(expression)
+        # Embed the group tag in the comment so the UI can route the param on reload
+        comment = _set_group_tag(description, group_id) if group_id else description
+        user_params.add(name, value_input, unit, comment)
+        futil.log(f'Parameter Bridge: Created user parameter {name} = {expression} (group={group_id!r})')
+        return {'created': True, 'error': None}
+    except Exception as e:
+        err = f'Failed to create parameter {name}: {e}'
+        futil.log(err, adsk.core.LogLevels.ErrorLogLevel)
+        return {'created': False, 'error': err}
+
+
+# ═══════════════════════════════════════════════════════════════════
 # Apply parameters in batch
 # ═══════════════════════════════════════════════════════════════════
 
-def apply_parameters(design: adsk.fusion.Design, param_values: dict):
-    """Apply a dict of parameter expressions to the design.
+def apply_parameters(design: adsk.fusion.Design, param_values: dict, creates: list = None):
+    """Apply a dict of parameter expressions to the design, and optionally create new ones.
 
     Args:
         design: The active Fusion design.
         param_values: Dict of { param_name: new_expression_string }.
                       Only editable schema-defined parameters are applied.
                       Formula-based parameters are protected and ignored.
+        creates: Optional list of dicts with { name, expression, description }
+                 representing new user parameters to create in Fusion.
 
     Returns:
-        dict: { "updated": int, "errors": [str] }
+        dict: { "updated": int, "created": int, "errors": [str] }
     """
     # Get the cached set of editable parameter names
     # Formula-based parameters are excluded to prevent overwriting expressions
     allowed_names = _get_editable_names()
     if not allowed_names:
-        return {'updated': 0, 'errors': ['Schema could not be loaded.']}
+        return {'updated': 0, 'created': 0, 'errors': ['Schema could not be loaded.']}
 
-    if not param_values:
-        return {'updated': 0, 'errors': []}
+    if not param_values and not creates:
+        return {'updated': 0, 'created': 0, 'errors': []}
 
     # Load parameter limits for validation
     limits = _get_param_limits()
@@ -611,11 +797,27 @@ def apply_parameters(design: adsk.fusion.Design, param_values: dict):
             futil.log(f'Parameter Bridge: {err_msg}',
                       adsk.core.LogLevels.ErrorLogLevel)
 
+    # Handle creates — new user parameters to add to the design
+    created = 0
+    if creates:
+        for item in creates:
+            result = create_user_parameter(
+                design,
+                item.get('name', ''),
+                item.get('expression', ''),
+                item.get('description', ''),
+                item.get('groupId', '')
+            )
+            if result['created']:
+                created += 1
+            elif result['error']:
+                errors.append(result['error'])
+
     futil.log(
-        f'Parameter Bridge: Applied {updated} parameter(s), '
+        f'Parameter Bridge: Applied {updated} parameter(s), created {created}, '
         f'{protected} protected, {out_of_range} out-of-range, {len(errors)} error(s)'
     )
-    return {'updated': updated, 'errors': errors}
+    return {'updated': updated, 'created': created, 'errors': errors}
 
 
 # ═══════════════════════════════════════════════════════════════════

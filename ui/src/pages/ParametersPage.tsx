@@ -19,6 +19,9 @@ function UncategorizedSection({
   parameterMap,
   groupSchemas,
   allParamNames,
+  customCategories,
+  onAddCustomCategory,
+  onRemoveCustomCategory,
 }: {
   extraParams: Parameter[]
   displayValues: Record<string, string>
@@ -30,6 +33,9 @@ function UncategorizedSection({
   parameterMap: Record<string, { unit: string }>
   groupSchemas: { id: string; label: string }[]
   allParamNames: Set<string>
+  customCategories: { id: string; label: string }[]
+  onAddCustomCategory?: (id: string, label: string) => void
+  onRemoveCustomCategory?: (id: string) => void
 }) {
   const [open, setOpen] = useState(true)
 
@@ -79,6 +85,9 @@ function UncategorizedSection({
                 onChange={onChange}
                 onFocus={onFocus}
                 onBlur={onBlur}
+                customCategories={customCategories}
+                onAddCustomCategory={onAddCustomCategory}
+                onRemoveCustomCategory={onRemoveCustomCategory}
               />
             )
           })}
@@ -94,10 +103,14 @@ function CategoryCombobox({
   value,
   onChange,
   options,
+  onAddCategory,
+  onRemoveCategory,
 }: {
   value: string
   onChange: (val: string) => void
   options: { id: string; label: string }[]
+  onAddCategory?: (id: string, label: string) => void
+  onRemoveCategory?: (id: string) => void
 }) {
   const [open, setOpen] = useState(false)
   const [search, setSearch] = useState("")
@@ -109,6 +122,23 @@ function CategoryCombobox({
   const selectedLabel =
     options.find((opt) => opt.id === value)?.label || "Select category..."
 
+  // Check if search text is a new category (not in options and not empty)
+  const canCreateNew = search.trim().length > 0 && !options.some((opt) => opt.label.toLowerCase() === search.toLowerCase())
+
+  const handleCreateNew = () => {
+    const normalized = search.trim()
+    if (normalized.length === 0) return
+
+    // Capitalize first letter
+    const capitalized = normalized.charAt(0).toUpperCase() + normalized.slice(1)
+    const newId = `custom-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`
+
+    onAddCategory?.(newId, capitalized)
+    onChange(newId)
+    setOpen(false)
+    setSearch("")
+  }
+
   return (
     <div className="relative">
       <input
@@ -116,6 +146,12 @@ function CategoryCombobox({
         value={open ? search : selectedLabel}
         onChange={(e) => setSearch(e.target.value)}
         onFocus={() => setOpen(true)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" && canCreateNew) {
+            e.preventDefault()
+            handleCreateNew()
+          }
+        }}
         placeholder="Select or type..."
         className="w-full h-8 px-2.5 text-xs rounded-lg border border-input bg-background focus:outline-none focus:ring-1 focus:ring-ring"
       />
@@ -126,26 +162,53 @@ function CategoryCombobox({
             onClick={() => setOpen(false)}
           />
           <div className="absolute top-full left-0 right-0 z-20 mt-1 rounded-lg border border-border bg-popover shadow-md py-1 max-h-48 overflow-y-auto">
-            {filtered.length === 0 ? (
+            {/* Create new category option */}
+            {canCreateNew && (
+              <button
+                onClick={handleCreateNew}
+                className="w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-muted text-green-700 dark:text-green-400 font-medium border-b border-border/50"
+              >
+                + Create "{search.trim()}"
+              </button>
+            )}
+
+            {filtered.length === 0 && !canCreateNew ? (
               <div className="px-3 py-1.5 text-xs text-muted-foreground">
                 No results found
               </div>
             ) : (
               filtered.map((opt) => (
-                <button
+                <div
                   key={opt.id}
-                  onClick={() => {
-                    onChange(opt.id)
-                    setOpen(false)
-                    setSearch("")
-                  }}
-                  className={[
-                    "w-full text-left px-3 py-1.5 text-xs transition-colors hover:bg-muted",
-                    value === opt.id ? "bg-purple-50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-300 font-medium" : "text-foreground",
-                  ].join(" ")}
+                  className="flex items-center w-full group/item"
                 >
-                  {opt.label}
-                </button>
+                  <button
+                    onClick={() => {
+                      onChange(opt.id)
+                      setOpen(false)
+                      setSearch("")
+                    }}
+                    className={[
+                      "flex-1 text-left px-3 py-1.5 text-xs transition-colors hover:bg-muted",
+                      value === opt.id ? "bg-purple-50 dark:bg-purple-950/30 text-purple-700 dark:text-purple-300 font-medium" : "text-foreground",
+                    ].join(" ")}
+                  >
+                    {opt.label}
+                  </button>
+                  {/* Delete button for custom categories */}
+                  {opt.id.startsWith("custom-") && (
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onRemoveCategory?.(opt.id)
+                      }}
+                      className="px-2 py-1.5 text-muted-foreground hover:text-red-600 dark:hover:text-red-400 opacity-0 group-item/item-hover:opacity-100 transition-all shrink-0"
+                      title="Delete category"
+                    >
+                      <X size={12} />
+                    </button>
+                  )}
+                </div>
               ))
             )}
           </div>
@@ -198,6 +261,9 @@ function ParamInfoModal({
   unit,
   isSchema,
   onClose,
+  customCategories,
+  onAddCustomCategory,
+  onRemoveCustomCategory,
 }: {
   param: Parameter
   currentGroupId: string
@@ -207,6 +273,9 @@ function ParamInfoModal({
   unit: string
   isSchema: boolean
   onClose: () => void
+  customCategories: { id: string; label: string }[]
+  onAddCustomCategory?: (id: string, label: string) => void
+  onRemoveCustomCategory?: (id: string) => void
 }) {
   const [name, setName] = useState(param.name)
   const [description, setDescription] = useState(param.description || "")
@@ -315,7 +384,9 @@ function ParamInfoModal({
           <CategoryCombobox
             value={groupId}
             onChange={setGroupId}
-            options={[{ id: "", label: "Uncategorized" }, ...groupSchemas]}
+            options={[{ id: "", label: "Uncategorized" }, ...groupSchemas, ...customCategories]}
+            onAddCategory={onAddCustomCategory}
+            onRemoveCategory={onRemoveCustomCategory}
           />
         </div>
       )}
@@ -380,6 +451,9 @@ function SchemaParamRow({
   onChange,
   onFocus,
   onBlur,
+  customCategories,
+  onAddCustomCategory,
+  onRemoveCustomCategory,
 }: {
   param: Parameter
   displayValue: string
@@ -394,6 +468,9 @@ function SchemaParamRow({
   onChange: (name: string, val: string) => void
   onFocus: (name: string) => void
   onBlur: (name: string) => void
+  customCategories: { id: string; label: string }[]
+  onAddCustomCategory?: (id: string, label: string) => void
+  onRemoveCustomCategory?: (id: string) => void
 }) {
   const [modalOpen, setModalOpen] = useState(false)
   const label = scaleMode === "single" && param.name === "ScaleLengthBass" ? "Scale Length" : param.label
@@ -479,6 +556,9 @@ function SchemaParamRow({
           unit={displayUnit}
           isSchema={true}
           onClose={() => setModalOpen(false)}
+          customCategories={customCategories}
+          onAddCustomCategory={onAddCustomCategory}
+          onRemoveCustomCategory={onRemoveCustomCategory}
         />
       )}
     </>
@@ -498,6 +578,9 @@ function ExtraParamRow({
   onChange,
   onFocus,
   onBlur,
+  customCategories,
+  onAddCustomCategory,
+  onRemoveCustomCategory,
 }: {
   param: Parameter
   currentGroupId: string
@@ -509,6 +592,9 @@ function ExtraParamRow({
   onChange: (name: string, val: string) => void
   onFocus: (name: string) => void
   onBlur: (name: string) => void
+  customCategories: { id: string; label: string }[]
+  onAddCustomCategory?: (id: string, label: string) => void
+  onRemoveCustomCategory?: (id: string) => void
 }) {
   const [editOpen, setEditOpen] = useState(false)
 
@@ -562,6 +648,9 @@ function ExtraParamRow({
           unit={unit}
           isSchema={false}
           onClose={() => setEditOpen(false)}
+          customCategories={customCategories}
+          onAddCustomCategory={onAddCustomCategory}
+          onRemoveCustomCategory={onRemoveCustomCategory}
         />
       )}
     </>
@@ -733,6 +822,9 @@ function GroupSection({
   onPendingParamChange,
   allParamNames,
   showAddButton,
+  customCategories,
+  onAddCustomCategory,
+  onRemoveCustomCategory,
 }: {
   group: ParameterGroup
   displayValues: Record<string, string>
@@ -757,6 +849,9 @@ function GroupSection({
   onPendingParamChange: (id: string, value: string) => void
   allParamNames: Set<string>
   showAddButton: boolean
+  customCategories: { id: string; label: string }[]
+  onAddCustomCategory: (id: string, label: string) => void
+  onRemoveCustomCategory: (id: string) => void
 }) {
   const [open, setOpen] = useState(defaultOpen)
 
@@ -850,6 +945,9 @@ function GroupSection({
                 onChange={onChange}
                 onFocus={onFocus}
                 onBlur={onBlur}
+                customCategories={customCategories}
+                onAddCustomCategory={onAddCustomCategory}
+                onRemoveCustomCategory={onRemoveCustomCategory}
               />
             )
           })}
@@ -871,6 +969,9 @@ function GroupSection({
                 onChange={onChange}
                 onFocus={onFocus}
                 onBlur={onBlur}
+                customCategories={customCategories}
+                onAddCustomCategory={onAddCustomCategory}
+                onRemoveCustomCategory={onRemoveCustomCategory}
               />
             )
           })}
@@ -956,6 +1057,7 @@ export function ParametersPage({
   const [showErrorFilter, setShowErrorFilter] = useState(false)
   const [pendingParams, setPendingParams] = useState<PendingParam[]>([])
   const [activeAddFormGroupId, setActiveAddFormGroupId] = useState<string | null>(null)
+  const [customCategories, setCustomCategories] = useState<{ id: string; label: string }[]>([])
 
   const isInitial = !payload?.hasFingerprint
   const documentUnit = payload?.documentUnit ?? "in"
@@ -1226,6 +1328,14 @@ export function ParametersPage({
     return unit ? `${p.value} ${unit}` : p.value
   }
 
+  function handleAddCustomCategory(id: string, label: string) {
+    setCustomCategories((prev) => [...prev, { id, label }])
+  }
+
+  function handleRemoveCustomCategory(id: string) {
+    setCustomCategories((prev) => prev.filter((cat) => cat.id !== id))
+  }
+
   return (
     <div className="flex flex-col flex-1 min-h-0">
       {/* Header */}
@@ -1390,6 +1500,9 @@ export function ParametersPage({
                   onPendingParamChange={handlePendingParamChange}
                   allParamNames={allParamNames}
                   showAddButton={!isInitial}
+                  customCategories={customCategories}
+                  onAddCustomCategory={handleAddCustomCategory}
+                  onRemoveCustomCategory={handleRemoveCustomCategory}
                 />
               ))}
 
@@ -1406,6 +1519,9 @@ export function ParametersPage({
                   parameterMap={parameterMap}
                   groupSchemas={payload.groups.map((g) => ({ id: g.id, label: g.label }))}
                   allParamNames={allParamNames}
+                  customCategories={customCategories}
+                  onAddCustomCategory={handleAddCustomCategory}
+                  onRemoveCustomCategory={handleRemoveCustomCategory}
                 />
               )}
             </>

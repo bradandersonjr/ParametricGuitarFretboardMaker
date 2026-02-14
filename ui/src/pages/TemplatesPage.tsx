@@ -158,27 +158,31 @@ export function TemplatesPage({ payload, templateList, onTemplateLoaded }: Templ
   const [saveDesc, setSaveDesc] = useState("")
   const [loadedId, setLoadedId] = useState<string | null>(null)
   const [waitingForLoad, setWaitingForLoad] = useState(false)
+  const [payloadAtLoadTime, setPayloadAtLoadTime] = useState<ModelPayload | null>(null)
 
   // Request template list on mount
   useEffect(() => {
     sendToPython("GET_TEMPLATES")
   }, [])
 
-  // Navigate to Parameters once the payload updates after a load request
+  // Navigate to Parameters once the payload changes after a load request
+  // We compare by reference — Python sends a new object, so payload !== payloadAtLoadTime
   useEffect(() => {
-    if (waitingForLoad && payload) {
+    if (waitingForLoad && payload && payload !== payloadAtLoadTime) {
       setWaitingForLoad(false)
+      setPayloadAtLoadTime(null)
       onTemplateLoaded()
     }
-  }, [payload, waitingForLoad, onTemplateLoaded])
+  }, [payload, waitingForLoad, payloadAtLoadTime, onTemplateLoaded])
 
   const handleLoad = useCallback(
     (template: GuitarTemplate) => {
       setLoadedId(template.id)
+      setPayloadAtLoadTime(payload)
       setWaitingForLoad(true)
       sendToPython("LOAD_TEMPLATE", { id: template.id, readonly: template.readonly })
     },
-    []
+    [payload]
   )
 
   const handleDelete = useCallback((template: GuitarTemplate) => {

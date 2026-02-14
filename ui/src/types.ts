@@ -18,6 +18,7 @@ export interface Parameter {
   expression?: string
   value?: number | null
   unit?: string
+  group?: string    // set on extra params that have a pgfm-group tag
 }
 
 export interface ParameterGroup {
@@ -53,6 +54,16 @@ export interface GuitarTemplate {
 export interface TemplateListPayload {
   presets: GuitarTemplate[]
   userTemplates: GuitarTemplate[]
+}
+
+/** A new parameter staged locally before being applied to Fusion */
+export interface PendingParam {
+  id: string           // local UUID for React key, never sent to backend
+  name: string         // Fusion parameter name (e.g. "MyPickupDepth")
+  value: string        // numeric string e.g. "12.5"
+  unitKind: "length" | "angle" | "unitless"
+  groupId: string      // which schema group it belongs to visually
+  description: string  // optional Fusion comment
 }
 
 /** Timeline item representation */
