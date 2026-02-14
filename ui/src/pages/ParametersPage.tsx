@@ -139,9 +139,12 @@ function CategoryCombobox({
     setSearch("")
   }
 
+  const inputRef = React.useRef<HTMLInputElement>(null)
+
   return (
     <div className="relative">
       <input
+        ref={inputRef}
         type="text"
         value={open ? search : selectedLabel}
         onChange={(e) => setSearch(e.target.value)}
@@ -161,7 +164,11 @@ function CategoryCombobox({
             className="fixed inset-0 z-40"
             onClick={() => setOpen(false)}
           />
-          <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-lg border border-border bg-popover shadow-md py-1 max-h-48 overflow-y-auto">
+          <div className="fixed z-50 mt-1 rounded-lg border border-border bg-popover shadow-md py-1 max-h-48 overflow-y-auto" style={{
+            top: inputRef.current ? `${inputRef.current.getBoundingClientRect().bottom}px` : '0',
+            left: inputRef.current ? `${inputRef.current.getBoundingClientRect().left}px` : '0',
+            width: inputRef.current ? `${inputRef.current.getBoundingClientRect().width}px` : '0',
+          }}>
             {/* Create new category option */}
             {canCreateNew && (
               <button
