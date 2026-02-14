@@ -158,10 +158,10 @@ function CategoryCombobox({
       {open && (
         <>
           <div
-            className="fixed inset-0 z-10"
+            className="fixed inset-0 z-40"
             onClick={() => setOpen(false)}
           />
-          <div className="absolute top-full left-0 right-0 z-20 mt-1 rounded-lg border border-border bg-popover shadow-md py-1 max-h-48 overflow-y-auto">
+          <div className="absolute top-full left-0 right-0 z-50 mt-1 rounded-lg border border-border bg-popover shadow-md py-1 max-h-48 overflow-y-auto">
             {/* Create new category option */}
             {canCreateNew && (
               <button
