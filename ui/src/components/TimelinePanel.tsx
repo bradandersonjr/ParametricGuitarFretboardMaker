@@ -1,7 +1,15 @@
 import { useEffect, useState, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet"
+import {
+  Drawer,
+  DrawerContent,
+  DrawerTrigger,
+  DrawerHeader,
+  DrawerTitle,
+  DrawerDescription,
+  DrawerFooter,
+} from "@/components/ui/drawer"
 import { sendToPython, addMessageHandler } from "@/lib/fusion-bridge"
 import type { TimelineItem, TimelineSummary } from "@/types"
 import { ChevronDown, ChevronRight, Eye, EyeOff, RefreshCw, AlertCircle, Layers } from "lucide-react"
@@ -142,15 +150,15 @@ export function TimelinePanel({ isOpen: controlledOpen, onOpenChange }: Timeline
     }
   })
 
-  const sheetContent = (
+  const drawerContent = (
     <div className="flex flex-col h-full">
       {/* Header */}
-      <header className="px-4 py-3 border-b border-border shrink-0">
-        <h1 className="text-sm font-bold tracking-tight font-heading">Timeline Browser</h1>
-        <p className="text-xs text-muted-foreground mt-0.5">
+      <DrawerHeader>
+        <DrawerTitle>Timeline Browser</DrawerTitle>
+        <DrawerDescription>
           Suppress or unsuppress features and groups
-        </p>
-      </header>
+        </DrawerDescription>
+      </DrawerHeader>
 
       {/* Summary stats */}
       {summary && (
@@ -305,7 +313,7 @@ export function TimelinePanel({ isOpen: controlledOpen, onOpenChange }: Timeline
       </ScrollArea>
 
       {/* Action buttons */}
-      <footer className="flex items-center gap-2 px-3 py-2.5 border-t border-border bg-card shrink-0">
+      <DrawerFooter>
         <Button
           onClick={handleSubmit}
           disabled={loading || Object.keys(localSuppressed).length === 0}
@@ -333,13 +341,13 @@ export function TimelinePanel({ isOpen: controlledOpen, onOpenChange }: Timeline
         >
           <RefreshCw size={14} />
         </Button>
-      </footer>
+      </DrawerFooter>
     </div>
   )
 
   return (
-    <Sheet open={isOpen} onOpenChange={handleOpenChange}>
-      <SheetTrigger asChild>
+    <Drawer open={isOpen} onOpenChange={handleOpenChange} direction="right">
+      <DrawerTrigger asChild>
         <Button
           variant="outline"
           size="sm"
@@ -354,10 +362,10 @@ export function TimelinePanel({ isOpen: controlledOpen, onOpenChange }: Timeline
             </span>
           )}
         </Button>
-      </SheetTrigger>
-      <SheetContent side="right" className="flex flex-col w-[380px] p-0">
-        {sheetContent}
-      </SheetContent>
-    </Sheet>
+      </DrawerTrigger>
+      <DrawerContent className="flex flex-col w-[380px] p-0">
+        {drawerContent}
+      </DrawerContent>
+    </Drawer>
   )
 }

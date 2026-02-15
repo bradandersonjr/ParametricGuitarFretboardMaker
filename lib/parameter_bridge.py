@@ -337,17 +337,24 @@ def build_schema_payload(design: adsk.fusion.Design = None):
             except (ValueError, TypeError):
                 numeric_value = None
 
+            # Debug: log what we're extracting for the first param
+            if param_def['name'] == 'ScaleLengthBass':
+                print(f"[DEBUG] ScaleLengthBass param_def: {param_def}")
+                print(f"[DEBUG] defaultMetric from param_def: {param_def.get('defaultMetric')}")
+
             group['parameters'].append({
                 'name': param_def['name'],
                 'label': param_def.get('label', param_def['name']),
                 'unitKind': param_def.get('unitKind', 'length'),
                 'controlType': param_def.get('controlType', 'number'),
                 'default': default_expr,
+                'defaultMetric': param_def.get('defaultMetric'),
                 'min': param_def.get('min'),
                 'max': param_def.get('max'),
                 'minMetric': param_def.get('minMetric'),
                 'maxMetric': param_def.get('maxMetric'),
                 'step': param_def.get('step'),
+                'stepMetric': param_def.get('stepMetric'),
                 'description': param_def.get('description', ''),
                 'expression': default_expr,
                 'value': numeric_value,
@@ -359,19 +366,21 @@ def build_schema_payload(design: adsk.fusion.Design = None):
 
     doc_unit = get_document_unit(design) if design is not None else 'in'
 
-    # Set the unit for each parameter using the document unit, and convert values if needed
+    # Set the unit for each parameter using the document unit
     for group in groups:
         for param in group['parameters']:
             param['unit'] = get_unit_symbol(param['unitKind'], doc_unit)
 
-            # If document is metric and parameter is a length, convert defaults from inches to mm
-            if doc_unit == 'mm' and param['unitKind'] == 'length':
-                if param['value'] is not None:
-                    param['value'] = param['value'] * 25.4
-                # Update expression to have the converted value and new unit
-                if param['value'] is not None:
-                    param['expression'] = f"{param['value']} {param['unit']}"
-                    param['default'] = param['expression']
+            # If document is metric and parameter is a length, use hand-authored
+            # metric default from the schema instead of runtime conversion
+            if doc_unit == 'mm' and param['unitKind'] == 'length' and param.get('defaultMetric'):
+                metric_default = param['defaultMetric']
+                try:
+                    param['value'] = float(metric_default)
+                except (ValueError, TypeError):
+                    pass
+                param['expression'] = f"{metric_default} {param['unit']}"
+                param['default'] = param['expression']
 
     payload = {
         'schemaVersion': schema.get('schemaVersion', 'unknown'),
@@ -471,11 +480,13 @@ def build_ui_payload(design: adsk.fusion.Design):
                 'unitKind': param_def.get('unitKind', 'length'),
                 'controlType': param_def.get('controlType', 'number'),
                 'default': param_def.get('default', ''),
+                'defaultMetric': param_def.get('defaultMetric'),
                 'min': param_def.get('min'),
                 'max': param_def.get('max'),
                 'minMetric': param_def.get('minMetric'),
                 'maxMetric': param_def.get('maxMetric'),
                 'step': param_def.get('step'),
+                'stepMetric': param_def.get('stepMetric'),
                 'description': param_def.get('description', ''),
                 'expression': live['expression'],
                 'value': live['value'],

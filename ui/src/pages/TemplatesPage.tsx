@@ -10,9 +10,11 @@ interface TemplatesPageProps {
   payload: ModelPayload | null
   templateList: TemplateListPayload | null
   onTemplateLoaded: () => void
+  documentUnit: string
 }
 
-function getDisplayParams(params: Record<string, string>) {
+function getDisplayParams(params: Record<string, string>, documentUnit?: string) {
+  const isMetric = documentUnit === 'mm'
   const keys = ["FretCount", "StringCount", "ScaleLengthBass", "ScaleLengthTreb", "NeutralFret"]
   const labels: Record<string, string> = {
     FretCount: "Frets",
@@ -21,22 +23,32 @@ function getDisplayParams(params: Record<string, string>) {
     ScaleLengthTreb: "Treble scale",
     NeutralFret: "Neutral fret",
   }
+  // Length params that have a _metric variant in the preset file
+  const lengthKeys = new Set(["ScaleLengthBass", "ScaleLengthTreb"])
   return keys
     .filter((k) => params[k] !== undefined)
-    .map((k) => `${labels[k]}: ${params[k]}`)
+    .map((k) => {
+      const metricKey = `${k}_metric`
+      const value = isMetric && lengthKeys.has(k) && params[metricKey] !== undefined
+        ? params[metricKey]
+        : params[k]
+      return `${labels[k]}: ${value}`
+    })
 }
 
 function TemplateCard({
   template,
   onLoad,
   onDelete,
+  documentUnit,
 }: {
   template: GuitarTemplate
   onLoad: (t: GuitarTemplate) => void
   onDelete?: (t: GuitarTemplate) => void
+  documentUnit?: string
 }) {
   const [confirming, setConfirming] = useState(false)
-  const hints = getDisplayParams(template.parameters)
+  const hints = getDisplayParams(template.parameters, documentUnit)
 
   return (
     <div className="border border-border rounded-lg p-3 space-y-2 bg-card">
@@ -150,7 +162,7 @@ function CollapsibleSection({
   )
 }
 
-export function TemplatesPage({ payload, templateList, onTemplateLoaded }: TemplatesPageProps) {
+export function TemplatesPage({ payload, templateList, onTemplateLoaded, documentUnit }: TemplatesPageProps) {
   const presets = templateList?.presets ?? []
   const userTemplates = templateList?.userTemplates ?? []
   const [saving, setSaving] = useState(false)
@@ -315,6 +327,7 @@ export function TemplatesPage({ payload, templateList, onTemplateLoaded }: Templ
                     key={t.id}
                     template={t}
                     onLoad={handleLoad}
+                    documentUnit={documentUnit}
                   />
                 ))}
               </div>

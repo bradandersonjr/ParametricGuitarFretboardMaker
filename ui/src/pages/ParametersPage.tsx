@@ -1,10 +1,130 @@
-import React, { useEffect, useMemo, useState } from "react"
+import React, { useEffect, useMemo, useRef, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { sendToPython } from "@/lib/fusion-bridge"
 import type { ModelPayload, ParameterGroup, Parameter, PendingParam } from "@/types"
-import { ChevronDown, ChevronRight, LayoutGrid, X, Search, Undo2, Redo2, Plus, Minus, AlertCircle } from "lucide-react"
+import { ChevronDown, ChevronRight, LayoutGrid, X, Search, Undo2, Redo2, Plus, Minus, AlertCircle, RefreshCw, RotateCcw } from "lucide-react"
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { TimelinePanel } from "@/components/TimelinePanel"
+
+// ── Custom category section ────────────────────────────────────────
+
+function CustomCategorySection({
+  category,
+  extraParams,
+  displayValues,
+  originalExpressions,
+  onChange,
+  onFocus,
+  onBlur,
+  searchQuery,
+  parameterMap,
+  groupSchemas,
+  allParamNames,
+  customCategories,
+  onAddCustomCategory,
+  onRemoveCustomCategory,
+  documentUnit,
+  isAddFormOpen,
+  onOpenAddForm,
+  onCloseAddForm,
+}: {
+  category: { id: string; label: string }
+  extraParams: Parameter[]
+  displayValues: Record<string, string>
+  originalExpressions: Record<string, string>
+  onChange: (name: string, val: string) => void
+  onFocus: (name: string) => void
+  onBlur: (name: string) => void
+  searchQuery: string
+  parameterMap: Record<string, { unit: string }>
+  groupSchemas: { id: string; label: string }[]
+  allParamNames: Set<string>
+  customCategories: { id: string; label: string }[]
+  onAddCustomCategory?: (id: string, label: string) => void
+  onRemoveCustomCategory?: (id: string) => void
+  documentUnit: string
+  isAddFormOpen: boolean
+  onOpenAddForm: () => void
+  onCloseAddForm: () => void
+}) {
+  const [open, setOpen] = useState(true)
+
+  const filteredParams = extraParams.filter((param) => {
+    const query = searchQuery.toLowerCase()
+    return (
+      param.name.toLowerCase().includes(query) ||
+      param.description.toLowerCase().includes(query)
+    )
+  })
+
+  if (filteredParams.length === 0 && !isAddFormOpen) {
+    return null
+  }
+
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      <button
+        className="w-full flex items-center gap-2 px-3 py-2 bg-muted/40 hover:bg-muted/70 transition-colors text-left rounded-t-lg"
+        onClick={() => setOpen((o) => !o)}
+      >
+        <span className="text-muted-foreground">
+          {open ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
+        </span>
+        <LayoutGrid size={13} className="text-muted-foreground shrink-0" />
+        <span className="text-xs font-semibold font-heading">{category.label}</span>
+        <span className="text-xs text-muted-foreground font-normal">
+          ({filteredParams.length} parameter{filteredParams.length !== 1 ? "s" : ""})
+        </span>
+        <span
+          role="button"
+          aria-label={`Add parameter to ${category.label}`}
+          title={`Add parameter to ${category.label}`}
+          className="ml-auto flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-muted transition-colors text-muted-foreground hover:text-foreground text-[11px] font-medium"
+          onClick={(e) => { e.stopPropagation(); if (!open) setOpen(true); onOpenAddForm() }}
+        >
+          <Plus size={11} />
+          New Parameter
+        </span>
+      </button>
+      {open && (
+        <div className="px-3 py-3 space-y-2">
+          {filteredParams.map((param) => {
+            const modified = displayValues[param.name] !== originalExpressions[param.name]
+            const unit = parameterMap[param.name]?.unit || ""
+            return (
+              <ExtraParamRow
+                key={param.name}
+                param={param}
+                currentGroupId={category.id}
+                groupSchemas={groupSchemas}
+                displayValue={displayValues[param.name] ?? ""}
+                modified={modified}
+                unit={unit}
+                allParamNames={allParamNames}
+                onChange={onChange}
+                onFocus={onFocus}
+                onBlur={onBlur}
+                customCategories={customCategories}
+                onAddCustomCategory={onAddCustomCategory}
+                onRemoveCustomCategory={onRemoveCustomCategory}
+                documentUnit={documentUnit}
+              />
+            )
+          })}
+          {isAddFormOpen && (
+            <AddParamForm
+              groupId={category.id}
+              documentUnit={documentUnit}
+              allParamNames={allParamNames}
+              onCancel={onCloseAddForm}
+            />
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
 
 // ── Uncategorized section ──────────────────────────────────────────
 
@@ -22,6 +142,7 @@ function UncategorizedSection({
   customCategories,
   onAddCustomCategory,
   onRemoveCustomCategory,
+  documentUnit,
 }: {
   extraParams: Parameter[]
   displayValues: Record<string, string>
@@ -36,6 +157,7 @@ function UncategorizedSection({
   customCategories: { id: string; label: string }[]
   onAddCustomCategory?: (id: string, label: string) => void
   onRemoveCustomCategory?: (id: string) => void
+  documentUnit?: string
 }) {
   const [open, setOpen] = useState(true)
 
@@ -88,6 +210,7 @@ function UncategorizedSection({
                 customCategories={customCategories}
                 onAddCustomCategory={onAddCustomCategory}
                 onRemoveCustomCategory={onRemoveCustomCategory}
+                documentUnit={documentUnit}
               />
             )
           })}
@@ -209,7 +332,7 @@ function CategoryCombobox({
                         e.stopPropagation()
                         onRemoveCategory?.(opt.id)
                       }}
-                      className="px-2 py-1.5 text-muted-foreground hover:text-red-600 dark:hover:text-red-400 opacity-0 group-item/item-hover:opacity-100 transition-all shrink-0"
+                      className="px-2 py-1.5 text-muted-foreground hover:text-red-600 dark:hover:text-red-400 opacity-0 group-hover/item:opacity-100 transition-all shrink-0"
                       title="Delete category"
                     >
                       <X size={12} />
@@ -236,8 +359,8 @@ function ModalShell({ title, onClose, children }: { title: string; onClose: () =
 
   return (
     <>
-      <div className="fixed inset-0 z-40 bg-black/30" onClick={onClose} />
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-4 pointer-events-none">
+      <div className="fixed inset-0 z-[100] bg-black/30" onClick={onClose} />
+      <div className="fixed inset-0 z-[110] flex items-center justify-center p-4 pointer-events-none">
         <div
           className="pointer-events-auto w-full max-w-sm rounded-xl border border-border bg-popover shadow-xl p-4 space-y-3"
           onClick={(e) => e.stopPropagation()}
@@ -271,6 +394,7 @@ function ParamInfoModal({
   customCategories,
   onAddCustomCategory,
   onRemoveCustomCategory,
+  documentUnit,
 }: {
   param: Parameter
   currentGroupId: string
@@ -283,6 +407,7 @@ function ParamInfoModal({
   customCategories: { id: string; label: string }[]
   onAddCustomCategory?: (id: string, label: string) => void
   onRemoveCustomCategory?: (id: string) => void
+  documentUnit?: string
 }) {
   const [name, setName] = useState(param.name)
   const [description, setDescription] = useState(param.description || "")
@@ -330,14 +455,19 @@ function ParamInfoModal({
             {displayValue}{unit ? <span className="text-muted-foreground font-normal text-xs"> {unit}</span> : null}
           </p>
         </div>
-        {(param.min != null || param.max != null) && (
-          <div className="text-right shrink-0">
-            <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Range</p>
-            <p className="text-xs font-mono text-muted-foreground tabular-nums">
-              {param.min ?? "—"} – {param.max ?? "—"}{unit ? ` ${unit}` : ""}
-            </p>
-          </div>
-        )}
+        {(() => {
+          const isMetric = documentUnit === 'mm' && param.unitKind === 'length'
+          const displayMin = isMetric ? (param.minMetric ?? param.min) : param.min
+          const displayMax = isMetric ? (param.maxMetric ?? param.max) : param.max
+          return (displayMin != null || displayMax != null) ? (
+            <div className="text-right shrink-0">
+              <p className="text-[10px] uppercase tracking-wide font-semibold text-muted-foreground">Range</p>
+              <p className="text-xs font-mono text-muted-foreground tabular-nums">
+                {displayMin ?? "—"} – {displayMax ?? "—"}{unit ? ` ${unit}` : ""}
+              </p>
+            </div>
+          ) : null
+        })()}
       </div>
 
       {/* Name */}
@@ -461,6 +591,7 @@ function SchemaParamRow({
   customCategories,
   onAddCustomCategory,
   onRemoveCustomCategory,
+  documentUnit,
 }: {
   param: Parameter
   displayValue: string
@@ -478,6 +609,7 @@ function SchemaParamRow({
   customCategories: { id: string; label: string }[]
   onAddCustomCategory?: (id: string, label: string) => void
   onRemoveCustomCategory?: (id: string) => void
+  documentUnit?: string
 }) {
   const [modalOpen, setModalOpen] = useState(false)
   const label = scaleMode === "single" && param.name === "ScaleLengthBass" ? "Scale Length" : param.label
@@ -566,6 +698,7 @@ function SchemaParamRow({
           customCategories={customCategories}
           onAddCustomCategory={onAddCustomCategory}
           onRemoveCustomCategory={onRemoveCustomCategory}
+          documentUnit={documentUnit}
         />
       )}
     </>
@@ -588,6 +721,7 @@ function ExtraParamRow({
   customCategories,
   onAddCustomCategory,
   onRemoveCustomCategory,
+  documentUnit,
 }: {
   param: Parameter
   currentGroupId: string
@@ -602,6 +736,7 @@ function ExtraParamRow({
   customCategories: { id: string; label: string }[]
   onAddCustomCategory?: (id: string, label: string) => void
   onRemoveCustomCategory?: (id: string) => void
+  documentUnit?: string
 }) {
   const [editOpen, setEditOpen] = useState(false)
 
@@ -658,6 +793,7 @@ function ExtraParamRow({
           customCategories={customCategories}
           onAddCustomCategory={onAddCustomCategory}
           onRemoveCustomCategory={onRemoveCustomCategory}
+          documentUnit={documentUnit}
         />
       )}
     </>
@@ -955,6 +1091,7 @@ function GroupSection({
                 customCategories={customCategories}
                 onAddCustomCategory={onAddCustomCategory}
                 onRemoveCustomCategory={onRemoveCustomCategory}
+                documentUnit={documentUnit}
               />
             )
           })}
@@ -979,6 +1116,7 @@ function GroupSection({
                 customCategories={customCategories}
                 onAddCustomCategory={onAddCustomCategory}
                 onRemoveCustomCategory={onRemoveCustomCategory}
+                documentUnit={documentUnit}
               />
             )
           })}
@@ -1046,8 +1184,10 @@ function GroupSection({
 
 export function ParametersPage({
   payload,
+  documentUnit: documentUnitProp,
 }: {
   payload: ModelPayload | null
+  documentUnit: string
 }) {
   const [displayValues, setDisplayValues] = useState<Record<string, string>>({})
   const [searchQuery, setSearchQuery] = useState("")
@@ -1055,7 +1195,7 @@ export function ParametersPage({
   const [historyIndex, setHistoryIndex] = useState(-1)
   const [dismissedWarnings, setDismissedWarnings] = useState<Set<string>>(new Set())
   const [originalExpressions, setOriginalExpressions] = useState<Record<string, string>>({})
-  const [parameterMap, setParameterMap] = useState<Record<string, { unit: string; unitKind?: string; min?: number; max?: number; minMetric?: number; maxMetric?: number }>>({})
+  const [parameterMap, setParameterMap] = useState<Record<string, { unit: string; unitKind?: string; min?: number; max?: number; minMetric?: number; maxMetric?: number; step?: number; stepMetric?: number }>>({})
   const [validationErrors, setValidationErrors] = useState<Record<string, string>>({})
   const [scaleMode, setScaleMode] = useState<"single" | "multi">("single")
   const [baselineSet, setBaselineSet] = useState(false)
@@ -1064,10 +1204,12 @@ export function ParametersPage({
   const [showErrorFilter, setShowErrorFilter] = useState(false)
   const [pendingParams, setPendingParams] = useState<PendingParam[]>([])
   const [activeAddFormGroupId, setActiveAddFormGroupId] = useState<string | null>(null)
+  const [activeAddFormCustomCategoryId, setActiveAddFormCustomCategoryId] = useState<string | null>(null)
   const [customCategories, setCustomCategories] = useState<{ id: string; label: string }[]>([])
+  const prevDocumentUnitRef = useRef<string | undefined>(undefined)
 
   const isInitial = !payload?.hasFingerprint
-  const documentUnit = payload?.documentUnit ?? "in"
+  const documentUnit = documentUnitProp
 
   // All known parameter names (schema + extra from design + pending) — used for duplicate validation
   const allParamNames = useMemo(() => {
@@ -1082,33 +1224,52 @@ export function ParametersPage({
     return names
   }, [payload, pendingParams])
 
-  // Reset local state when payload changes
+  // Reset local state when payload or documentUnit changes
   useEffect(() => {
     if (!payload) return
 
+    const isMetric = documentUnit === 'mm'
+    console.log(`[ParametersPage] useEffect running: isMetric=${isMetric}, documentUnit=${documentUnit}`)
     const baseline: Record<string, string> = {}
     const display: Record<string, string> = {}
-    const paramMap: Record<string, { unit: string; unitKind?: string; min?: number; max?: number; minMetric?: number; maxMetric?: number }> = {}
+    const paramMap: Record<string, { unit: string; unitKind?: string; min?: number; max?: number; minMetric?: number; maxMetric?: number; step?: number; stepMetric?: number }> = {}
 
     for (const group of payload.groups) {
       for (const param of group.parameters) {
-        const expr = param.expression ?? param.default ?? ""
+        // For length params in metric mode, prefer the hand-authored metric default
+        const useMetric = isMetric && param.unitKind === 'length' && param.defaultMetric
+        if (param.name === 'ScaleLengthBass') {
+          console.log(`[ParametersPage] ScaleLengthBass - Object.keys:`, Object.keys(param))
+          console.log(`[ParametersPage] ScaleLengthBass - hasOwnProperty('defaultMetric'):`, param.hasOwnProperty('defaultMetric'))
+          console.log(`[ParametersPage] ScaleLengthBass - defaultMetric value:`, (param as any).defaultMetric)
+        }
+        const expr = useMetric
+          ? param.defaultMetric!
+          : (param.expression ?? param.default ?? "")
         const numericMatch = expr.match(/^([\d.]+)/)
         // If expression doesn't start with a number (e.g. fraction like "( 3 / 16 ) * 1 in"),
-        // fall back to the schema default which is the decimal equivalent
+        // fall back to the schema default which is the decimal equivalent.
+        // Always use only the numeric part — never include the unit suffix.
         const displayVal = numericMatch
           ? numericMatch[1]
           : (param.default?.match(/^([\d.]+)/)?.[1] ?? expr)
 
+        // Resolve the unit symbol based on the active documentUnit
+        const unit = param.unitKind === 'length' ? documentUnit
+          : param.unitKind === 'angle' ? 'deg'
+          : ''
+
         baseline[param.name] = displayVal
         display[param.name] = displayVal
         paramMap[param.name] = {
-          unit: param.unit ?? "",
+          unit,
           unitKind: param.unitKind,
           min: param.min !== undefined ? param.min : undefined,
           max: param.max !== undefined ? param.max : undefined,
           minMetric: param.minMetric !== undefined ? param.minMetric : undefined,
           maxMetric: param.maxMetric !== undefined ? param.maxMetric : undefined,
+          step: param.step !== undefined ? param.step : undefined,
+          stepMetric: param.stepMetric !== undefined ? param.stepMetric : undefined,
         }
       }
     }
@@ -1142,11 +1303,17 @@ export function ParametersPage({
     const isMulti = Math.abs(bass - treb) > 0.001
     setScaleMode(isMulti ? "multi" : "single")
 
+    // Detect unit system change (e.g. user switched between Imperial and Metric)
+    const prevUnit = prevDocumentUnitRef.current
+    const unitChanged = prevUnit !== undefined && documentUnit !== prevUnit
+    prevDocumentUnitRef.current = documentUnit
+
     // Reset baseline when:
     // - First load (no baseline yet)
     // - After apply refresh in live mode — design values are the new truth
+    // - When the unit system changes (defaults change entirely)
     // Do NOT reset on template load — we want amber diffs vs the previous baseline
-    const shouldResetBaseline = !baselineSet || payload.mode === 'live'
+    const shouldResetBaseline = !baselineSet || payload.mode === 'live' || unitChanged
     if (shouldResetBaseline) {
       setOriginalExpressions(baseline)
       setBaselineSet(true)
@@ -1157,7 +1324,7 @@ export function ParametersPage({
     setValidationErrors({})
     setHistory([])
     setHistoryIndex(-1)
-  }, [payload])
+  }, [payload, documentUnit])
 
   // Re-validate all fields whenever displayValues or parameterMap changes
   useEffect(() => {
@@ -1182,31 +1349,16 @@ export function ParametersPage({
       const isLengthInMm = limits.unitKind === 'length' && documentUnit === 'mm'
       const minVal = isLengthInMm ? limits.minMetric : limits.min
       const maxVal = isLengthInMm ? limits.maxMetric : limits.max
-      const minImperial = isLengthInMm ? limits.min : undefined
-      const maxImperial = isLengthInMm ? limits.max : undefined
 
       if (minVal == null && maxVal == null) {
         continue // No limits defined for this unit system
       }
 
+      const unitSuffix = isLengthInMm ? ' mm' : ''
       if (minVal != null && numValue < minVal) {
-        // For length params in mm, show both mm and inch values for clarity
-        if (minImperial != null) {
-          const minMm = minVal.toFixed(1)
-          const minIn = minImperial.toFixed(2)
-          newErrors[name] = `Min: ${minMm} mm (${minIn} in)`
-        } else {
-          newErrors[name] = `Min: ${minVal.toFixed(1)}`
-        }
+        newErrors[name] = `Min: ${minVal.toFixed(1)}${unitSuffix}`
       } else if (maxVal != null && numValue > maxVal) {
-        // For length params in mm, show both mm and inch values for clarity
-        if (maxImperial != null) {
-          const maxMm = maxVal.toFixed(1)
-          const maxIn = maxImperial.toFixed(2)
-          newErrors[name] = `Max: ${maxMm} mm (${maxIn} in)`
-        } else {
-          newErrors[name] = `Max: ${maxVal.toFixed(1)}`
-        }
+        newErrors[name] = `Max: ${maxVal.toFixed(1)}${unitSuffix}`
       }
     }
     setValidationErrors(newErrors)
@@ -1355,7 +1507,7 @@ export function ParametersPage({
 
       {/* Scale mode toggle - tabs */}
       <div className="shrink-0 border-b border-border bg-muted/30">
-        <div className="flex justify-center py-2">
+        <div className="relative flex items-center justify-center py-2 px-2">
           <div className="inline-flex bg-muted rounded-xl p-1 gap-1">
             <button
               onClick={() => {
@@ -1389,6 +1541,11 @@ export function ParametersPage({
               Multi-scale
             </button>
           </div>
+          {!isInitial && (
+            <div className="absolute right-2">
+              <TimelinePanel isOpen={timelineSheetOpen} onOpenChange={setTimelineSheetOpen} />
+            </div>
+          )}
         </div>
       </div>
 
@@ -1493,7 +1650,7 @@ export function ParametersPage({
                   defaultOpen={true}
                   searchQuery={searchQuery}
                   scaleMode={scaleMode}
-                  documentUnit={payload.documentUnit ?? "in"}
+                  documentUnit={documentUnit}
                   validationErrors={validationErrors}
                   editStartValues={editStartValues}
                   errorFilter={showErrorFilter ? new Set(Object.keys(validationErrors)) : null}
@@ -1501,7 +1658,7 @@ export function ParametersPage({
                   categorizedExtras={(payload.extraParams ?? []).filter((p) => p.group === group.id)}
                   groupSchemas={payload.groups.map((g) => ({ id: g.id, label: g.label }))}
                   isAddFormOpen={activeAddFormGroupId === group.id}
-                  onOpenAddForm={() => setActiveAddFormGroupId(group.id)}
+                  onOpenAddForm={() => { setActiveAddFormGroupId(group.id); setActiveAddFormCustomCategoryId(null) }}
                   onCloseAddForm={() => setActiveAddFormGroupId(null)}
                   onRemovePendingParam={handleRemovePendingParam}
                   onPendingParamChange={handlePendingParamChange}
@@ -1510,6 +1667,31 @@ export function ParametersPage({
                   customCategories={customCategories}
                   onAddCustomCategory={handleAddCustomCategory}
                   onRemoveCustomCategory={handleRemoveCustomCategory}
+                />
+              ))}
+
+              {/* Custom category sections — one per custom category */}
+              {!isInitial && customCategories.map((cat) => (
+                <CustomCategorySection
+                  key={cat.id}
+                  category={cat}
+                  extraParams={(payload.extraParams ?? []).filter((p) => p.group === cat.id)}
+                  displayValues={displayValues}
+                  originalExpressions={originalExpressions}
+                  onChange={handleParamChange}
+                  onFocus={handleParamFocus}
+                  onBlur={handleParamBlur}
+                  searchQuery={searchQuery}
+                  parameterMap={parameterMap}
+                  groupSchemas={payload.groups.map((g) => ({ id: g.id, label: g.label }))}
+                  allParamNames={allParamNames}
+                  customCategories={customCategories}
+                  onAddCustomCategory={handleAddCustomCategory}
+                  onRemoveCustomCategory={handleRemoveCustomCategory}
+                  documentUnit={documentUnit}
+                  isAddFormOpen={activeAddFormCustomCategoryId === cat.id}
+                  onOpenAddForm={() => { setActiveAddFormCustomCategoryId(cat.id); setActiveAddFormGroupId(null) }}
+                  onCloseAddForm={() => setActiveAddFormCustomCategoryId(null)}
                 />
               ))}
 
@@ -1529,6 +1711,7 @@ export function ParametersPage({
                   customCategories={customCategories}
                   onAddCustomCategory={handleAddCustomCategory}
                   onRemoveCustomCategory={handleRemoveCustomCategory}
+                  documentUnit={documentUnit}
                 />
               )}
             </>
@@ -1537,88 +1720,114 @@ export function ParametersPage({
       </ScrollArea>
 
       {/* Action bar */}
-      <footer className="flex items-center gap-2 px-3 py-2.5 border-t border-border bg-card shrink-0">
-        {!isInitial && <TimelinePanel isOpen={timelineSheetOpen} onOpenChange={setTimelineSheetOpen} />}
+      <TooltipProvider delayDuration={500}>
+        <footer className="flex items-center gap-2 px-3 py-2.5 border-t border-border bg-card shrink-0">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button variant="secondary" size="icon" className="h-8 w-8" onClick={() => sendToPython("GET_MODEL_STATE")}>
+                <RefreshCw size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Refresh from Fusion</TooltipContent>
+          </Tooltip>
 
-        <Button variant="secondary" size="sm" onClick={() => sendToPython("GET_MODEL_STATE")}>
-          Refresh
-        </Button>
-        {!isInitial && (hasChanges || hasPending) && (
-          <Button variant="ghost" size="sm" onClick={() => { handleResetAll(); setPendingParams([]) }} title="Reset all to baseline">
-            Reset
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                disabled={!hasChanges && !hasPending}
+                onClick={() => { handleResetAll(); setPendingParams([]) }}
+              >
+                <RotateCcw size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Reset to baseline</TooltipContent>
+          </Tooltip>
+
+          <Button
+            size="sm"
+            className={`flex-1 ${hasValidationErrors ? "bg-red-500 hover:bg-red-600 text-white" : ""}`}
+            disabled={!hasValidationErrors && (!isInitial && !hasChanges && !hasPending)}
+            onClick={() => {
+              if (hasValidationErrors) {
+                setShowErrorFilter(true)
+                return
+              }
+              const creates = pendingParams.map((p) => ({
+                name: p.name,
+                expression: buildPendingExpression(p),
+                description: p.description,
+                groupId: p.groupId,
+              }))
+              if (isInitial) {
+                const changedParams: Record<string, string> = {}
+                for (const [name, displayVal] of Object.entries(displayValues)) {
+                  const original = originalExpressions[name]
+                  if (original === undefined || displayVal !== original) {
+                    changedParams[name] = buildExpression(name, displayVal)
+                  }
+                }
+                setHistory([])
+                setHistoryIndex(-1)
+                sendToPython("APPLY_PARAMS", { updates: changedParams, creates })
+              } else {
+                const changed: Record<string, string> = {}
+                for (const [name, displayVal] of Object.entries(displayValues)) {
+                  const original = originalExpressions[name]
+                  if (original !== undefined && displayVal !== original) {
+                    changed[name] = buildExpression(name, displayVal)
+                  }
+                }
+                if (Object.keys(changed).length > 0 || creates.length > 0) {
+                  sendToPython("APPLY_PARAMS", { updates: changed, creates })
+                }
+              }
+            }}
+          >
+            {hasValidationErrors
+              ? "Please Fix Input Out of Range"
+              : isInitial
+                ? initialChangeCount > 0
+                  ? `Import & Apply ${initialChangeCount} change${initialChangeCount !== 1 ? "s" : ""}`
+                  : "Import & Apply"
+                : hasChanges || hasPending
+                  ? `Apply ${modifiedCount + pendingParams.length} change${(modifiedCount + pendingParams.length) !== 1 ? "s" : ""}${hasPending ? ` (${pendingParams.length} new)` : ""}`
+                  : "Apply to Model"}
           </Button>
-        )}
-        <Button
-          size="sm"
-          className={`flex-1 ${hasValidationErrors ? "bg-red-500 hover:bg-red-600 text-white" : ""}`}
-          disabled={!hasValidationErrors && (!isInitial && !hasChanges && !hasPending)}
-          onClick={() => {
-            if (hasValidationErrors) {
-              setShowErrorFilter(true)
-              return
-            }
-            const creates = pendingParams.map((p) => ({
-              name: p.name,
-              expression: buildPendingExpression(p),
-              description: p.description,
-              groupId: p.groupId,
-            }))
-            if (isInitial) {
-              const changedParams: Record<string, string> = {}
-              for (const [name, displayVal] of Object.entries(displayValues)) {
-                const original = originalExpressions[name]
-                if (original === undefined || displayVal !== original) {
-                  changedParams[name] = buildExpression(name, displayVal)
-                }
-              }
-              setHistory([])
-              setHistoryIndex(-1)
-              sendToPython("APPLY_PARAMS", { updates: changedParams, creates })
-            } else {
-              const changed: Record<string, string> = {}
-              for (const [name, displayVal] of Object.entries(displayValues)) {
-                const original = originalExpressions[name]
-                if (original !== undefined && displayVal !== original) {
-                  changed[name] = buildExpression(name, displayVal)
-                }
-              }
-              if (Object.keys(changed).length > 0 || creates.length > 0) {
-                sendToPython("APPLY_PARAMS", { updates: changed, creates })
-              }
-            }
-          }}
-        >
-          {hasValidationErrors
-            ? "Please Fix Input Out of Range"
-            : isInitial
-              ? initialChangeCount > 0
-                ? `Import & Apply ${initialChangeCount} change${initialChangeCount !== 1 ? "s" : ""}`
-                : "Import & Apply"
-              : hasChanges || hasPending
-                ? `Apply ${modifiedCount + pendingParams.length} change${(modifiedCount + pendingParams.length) !== 1 ? "s" : ""}${hasPending ? ` (${pendingParams.length} new)` : ""}`
-                : "Apply to Model"}
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          disabled={!canUndo}
-          onClick={handleUndo}
-          title="Undo"
-        >
-          <Undo2 size={14} />
-        </Button>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-8 w-8"
-          disabled={!canRedo}
-          onClick={handleRedo}
-          title="Redo"
-        >
-          <Redo2 size={14} />
-        </Button>
-      </footer>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                disabled={!canUndo}
+                onClick={handleUndo}
+              >
+                <Undo2 size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Undo</TooltipContent>
+          </Tooltip>
+
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-8 w-8"
+                disabled={!canRedo}
+                onClick={handleRedo}
+              >
+                <Redo2 size={14} />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent>Redo</TooltipContent>
+          </Tooltip>
+        </footer>
+      </TooltipProvider>
     </div>
   )
 }

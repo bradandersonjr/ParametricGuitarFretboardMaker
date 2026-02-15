@@ -9,11 +9,13 @@ export interface Parameter {
   unitKind: string
   controlType: string
   default: string
+  defaultMetric?: string
   min?: number
   max?: number
   minMetric?: number
   maxMetric?: number
   step?: number
+  stepMetric?: number
   description: string
   expression?: string
   value?: number | null

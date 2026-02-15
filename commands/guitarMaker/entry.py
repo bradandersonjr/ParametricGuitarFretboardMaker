@@ -23,6 +23,10 @@ _pending_apply = None   # param_values dict waiting for deferred execution
 _TIMELINE_EVENT_ID = f'{config.COMPANY_NAME}_{config.ADDIN_NAME}_timelineOp'
 _pending_timeline_op = None  # {'action': str, 'data': dict}
 
+# ── Deferred unit switch event ────────────────────────────────────────
+_SWITCH_UNITS_EVENT_ID = f'{config.COMPANY_NAME}_{config.ADDIN_NAME}_switchUnits'
+_pending_unit_switch = None  # target unit ('in' or 'mm') for deferred switch handler
+
 app = adsk.core.Application.get()
 ui = app.userInterface
 
@@ -36,6 +40,10 @@ IS_PROMOTED = True
 # ── UI placement ────────────────────────────────────────────────────
 WORKSPACE_ID = 'FusionSolidEnvironment'
 PANEL_ID = 'SolidCreatePanel'
+CLEANUP_PANEL_IDS = (
+    PANEL_ID,
+    'SolidScriptsAddinsPanel',  # Utilities > Add-Ins
+)
 COMMAND_BESIDE_ID = ''
 
 # ── Icon folder ─────────────────────────────────────────────────────
@@ -64,15 +72,47 @@ local_handlers = []
 _pending_payload = None         # Payload waiting for JS 'ready' signal
 _owner_document = None          # The document that owns the palette
 
+def _delete_command_controls(command_id: str):
+    """Delete stale command controls from known panels used by this add-in."""
+    workspace = ui.workspaces.itemById(WORKSPACE_ID)
+    if not workspace:
+        futil.log(f'{CMD_NAME}: Workspace not found during cleanup: {WORKSPACE_ID}',
+                  adsk.core.LogLevels.WarningLogLevel)
+        return
+
+    for panel_id in CLEANUP_PANEL_IDS:
+        panel = workspace.toolbarPanels.itemById(panel_id)
+        if not panel:
+            continue
+
+        control = panel.controls.itemById(command_id)
+        if control:
+            try:
+                control.deleteMe()
+                futil.log(f'{CMD_NAME}: Removed stale control from {workspace.id}/{panel.id}')
+            except Exception as e:
+                futil.log(
+                    f'{CMD_NAME}: Failed removing stale control from {workspace.id}/{panel.id}: {e}',
+                    adsk.core.LogLevels.WarningLogLevel
+                )
+
+
 def start(is_startup=False):
     """Register the toolbar button when the add-in starts."""
+    # Clean up any stale control/definition from a previous run that didn't stop cleanly.
+    _delete_command_controls(CMD_ID)
+
+    existing_def = ui.commandDefinitions.itemById(CMD_ID)
+    if existing_def:
+        existing_def.deleteMe()
+
+    workspace = ui.workspaces.itemById(WORKSPACE_ID)
+    panel = workspace.toolbarPanels.itemById(PANEL_ID)
     cmd_def = ui.commandDefinitions.addButtonDefinition(
         CMD_ID, CMD_NAME, CMD_DESCRIPTION, ICON_FOLDER
     )
     futil.add_handler(cmd_def.commandCreated, command_created)
 
-    workspace = ui.workspaces.itemById(WORKSPACE_ID)
-    panel = workspace.toolbarPanels.itemById(PANEL_ID)
     control = panel.controls.addCommand(cmd_def, COMMAND_BESIDE_ID if COMMAND_BESIDE_ID else '', False)
     control.isPromoted = IS_PROMOTED
 
@@ -86,6 +126,10 @@ def start(is_startup=False):
     # Register custom event for deferred timeline operations
     timeline_event = app.registerCustomEvent(_TIMELINE_EVENT_ID)
     futil.add_handler(timeline_event, _deferred_timeline_handler)
+
+    # Register custom event for deferred unit switching
+    switch_units_event = app.registerCustomEvent(_SWITCH_UNITS_EVENT_ID)
+    futil.add_handler(switch_units_event, _deferred_switch_units_handler)
 
     # Show welcome message when manually run, but not on Fusion startup
     if not is_startup:
@@ -101,13 +145,9 @@ def start(is_startup=False):
 
 def stop():
     """Remove the toolbar button and palette when the add-in stops."""
-    workspace = ui.workspaces.itemById(WORKSPACE_ID)
-    panel = workspace.toolbarPanels.itemById(PANEL_ID)
-    command_control = panel.controls.itemById(CMD_ID)
+    _delete_command_controls(CMD_ID)
     command_definition = ui.commandDefinitions.itemById(CMD_ID)
 
-    if command_control:
-        command_control.deleteMe()
     if command_definition:
         command_definition.deleteMe()
 
@@ -117,6 +157,7 @@ def stop():
 
     app.unregisterCustomEvent(_APPLY_EVENT_ID)
     app.unregisterCustomEvent(_TIMELINE_EVENT_ID)
+    app.unregisterCustomEvent(_SWITCH_UNITS_EVENT_ID)
 
 
 # ── Event handlers ──────────────────────────────────────────────────
@@ -207,7 +248,16 @@ def _show_palette(payload):
 
 def _send_payload(palette, payload):
     """Send the parameter payload to the JS UI."""
+    # Debug: log the payload structure before sending
+    for group in payload.get('groups', []):
+        for param in group.get('parameters', []):
+            if param.get('name') == 'ScaleLengthBass':
+                futil.log(f'[DEBUG] ScaleLengthBass in payload - defaultMetric: {param.get("defaultMetric")}')
+                futil.log(f'[DEBUG] ScaleLengthBass full param: {param}')
+                break
+
     data_json = json.dumps(payload)
+    futil.log(f'[DEBUG] JSON length: {len(data_json)} chars')
     palette.sendInfoToHTML('PUSH_MODEL_STATE', data_json)
     futil.log(f'{CMD_NAME}: Sent payload to palette '
               f'({sum(len(g["parameters"]) for g in payload["groups"])} params)')
@@ -225,6 +275,54 @@ def _on_open_url(data_json):
             futil.log(f'{CMD_NAME}: Opened URL: {url}')
     except Exception as e:
         futil.log(f'{CMD_NAME}: Error opening URL: {e}',
+                  adsk.core.LogLevels.ErrorLogLevel)
+
+
+def _on_switch_units(data_json=None):
+    """Fire deferred event to switch document units on the main thread."""
+    global _pending_unit_switch
+    _pending_unit_switch = None
+
+    if data_json:
+        try:
+            data = json.loads(data_json)
+            requested_unit = str(data.get('unit', '')).strip().lower()
+            if requested_unit in ('in', 'mm'):
+                _pending_unit_switch = requested_unit
+        except Exception:
+            # Fall back to toggle behavior if request payload is malformed.
+            _pending_unit_switch = None
+
+    futil.log(f'{CMD_NAME}: _on_switch_units called')
+    app.fireCustomEvent(_SWITCH_UNITS_EVENT_ID)
+    futil.log(f'{CMD_NAME}: _on_switch_units fired custom event')
+
+
+def _deferred_switch_units_handler(args: adsk.core.CustomEventArgs):
+    """Run on the Fusion main thread — safely changes the document unit."""
+    global _pending_unit_switch
+    try:
+        design = adsk.fusion.Design.cast(app.activeProduct)
+        if not design:
+            futil.log(f'{CMD_NAME}: SWITCH_UNITS — no active design',
+                      adsk.core.LogLevels.WarningLogLevel)
+            return
+
+        units_mgr = design.fusionUnitsManager
+        current_unit = units_mgr.defaultLengthUnits
+        requested_unit = _pending_unit_switch
+        _pending_unit_switch = None
+        new_unit = requested_unit if requested_unit in ('in', 'mm') else ('in' if current_unit == 'mm' else 'mm')
+        futil.log(f'{CMD_NAME}: SWITCH_UNITS — current={current_unit!r}, setting to {new_unit!r}')
+        units_mgr.defaultLengthUnits = new_unit
+        verify_unit = units_mgr.defaultLengthUnits
+        futil.log(f'{CMD_NAME}: SWITCH_UNITS — after set, verified={verify_unit!r}')
+        # Refresh UI with updated unit
+        _on_refresh_request()
+        _on_get_templates()
+        futil.log(f'{CMD_NAME}: SWITCH_UNITS — refresh and templates sent')
+    except Exception as e:
+        futil.log(f'{CMD_NAME}: Error switching units: {e}',
                   adsk.core.LogLevels.ErrorLogLevel)
 
 
@@ -250,8 +348,15 @@ def _load_template_file(filepath):
         return None
 
 
-def _build_template_list():
-    """Scan preset and user template dirs and return PUSH_TEMPLATES payload."""
+def _build_template_list(design=None):
+    """Scan preset and user template dirs and return PUSH_TEMPLATES payload.
+
+    Each preset contains both imperial and metric values. If a design is provided,
+    the unit-appropriate name and description are resolved before sending to the UI.
+
+    Args:
+        design: The active design (optional). Used to select unit-appropriate display strings.
+    """
     schema_version = '0.3.0'
     try:
         schema = parameter_bridge.load_schema()
@@ -260,17 +365,33 @@ def _build_template_list():
     except Exception:
         pass
 
+    # Get document unit to resolve unit-appropriate name/description
+    doc_unit = None
+    if design:
+        try:
+            doc_unit = parameter_bridge.get_document_unit(design)
+        except Exception:
+            pass
+
     presets = []
     if os.path.isdir(PRESETS_DIR):
         for fname in sorted(os.listdir(PRESETS_DIR)):
             if not fname.endswith('.json'):
                 continue
+
             data = _load_template_file(os.path.join(PRESETS_DIR, fname))
             if data:
+                # Use metric name/description for metric documents if available
+                if doc_unit == 'mm':
+                    display_name = data.get('name_metric', data.get('name', fname[:-5]))
+                    display_desc = data.get('description_metric', data.get('description', ''))
+                else:
+                    display_name = data.get('name', fname[:-5])
+                    display_desc = data.get('description', '')
                 presets.append({
                     'id': fname[:-5],
-                    'name': data.get('name', fname[:-5]),
-                    'description': data.get('description', ''),
+                    'name': display_name,
+                    'description': display_desc,
                     'createdAt': data.get('createdAt', ''),
                     'schemaVersion': data.get('schemaVersion', schema_version),
                     'readonly': True,
@@ -299,7 +420,8 @@ def _build_template_list():
 
 def _on_get_templates():
     """Send the current template list to the UI."""
-    payload = _build_template_list()
+    design = adsk.fusion.Design.cast(app.activeProduct)
+    payload = _build_template_list(design)
     palette = ui.palettes.itemById(PALETTE_ID)
     if palette:
         palette.sendInfoToHTML('PUSH_TEMPLATES', json.dumps(payload))
@@ -431,6 +553,10 @@ def _on_load_template(data_json):
         if schema is None:
             return
 
+        # Determine document unit early to select template values
+        design = adsk.fusion.Design.cast(app.activeProduct)
+        doc_unit = parameter_bridge.get_document_unit(design) if design else 'in'
+
         groups = []
         for group_def in schema.get('groups', []):
             group = {
@@ -443,7 +569,12 @@ def _on_load_template(data_json):
                 if not param_def.get('editable', True):
                     continue
                 name = param_def['name']
-                expr = parameters.get(name, param_def.get('default', ''))
+                # For metric docs with length params, prefer the _metric template value if available
+                if doc_unit == 'mm' and param_def.get('unitKind') == 'length':
+                    metric_key = f'{name}_metric'
+                    expr = parameters.get(metric_key, parameters.get(name, param_def.get('default', '')))
+                else:
+                    expr = parameters.get(name, param_def.get('default', ''))
                 try:
                     numeric_value = float(expr) if expr else None
                 except (ValueError, TypeError):
@@ -455,11 +586,13 @@ def _on_load_template(data_json):
                     'unitKind': unit_kind,
                     'controlType': param_def.get('controlType', 'number'),
                     'default': param_def.get('default', ''),
+                    'defaultMetric': param_def.get('defaultMetric'),
                     'min': param_def.get('min'),
                     'max': param_def.get('max'),
                     'minMetric': param_def.get('minMetric'),
                     'maxMetric': param_def.get('maxMetric'),
                     'step': param_def.get('step'),
+                    'stepMetric': param_def.get('stepMetric'),
                     'description': param_def.get('description', ''),
                     'expression': expr,
                     'value': numeric_value,
@@ -469,13 +602,23 @@ def _on_load_template(data_json):
 
         groups.sort(key=lambda g: g['order'])
 
-        design = adsk.fusion.Design.cast(app.activeProduct)
-        doc_unit = parameter_bridge.get_document_unit(design) if design else 'in'
-
         # Now set the unit for each parameter using the document unit
         for group in groups:
             for param in group['parameters']:
                 param['unit'] = parameter_bridge.get_unit_symbol(param['unitKind'], doc_unit)
+
+                # For metric docs, use hand-authored defaultMetric from schema
+                if doc_unit == 'mm' and param['unitKind'] == 'length':
+                    imperial_default = param.get('default', '')
+                    if param.get('defaultMetric') and param['expression'] == imperial_default:
+                        # Expression matches imperial default — use metric default
+                        metric_default = param['defaultMetric']
+                        try:
+                            param['value'] = float(metric_default)
+                        except (ValueError, TypeError):
+                            pass
+                        param['expression'] = f"{metric_default} {param['unit']}"
+                    param['default'] = f"{param.get('defaultMetric', '')} {param['unit']}" if param.get('defaultMetric') else param.get('default', '')
 
         # Get fingerprint and extra params from the design (if available)
         fingerprint = None
@@ -555,6 +698,9 @@ def palette_incoming(args: adsk.core.HTMLEventArgs):
     elif action == 'OPEN_TEMPLATES_FOLDER':
         _on_open_templates_folder()
 
+    elif action == 'SWITCH_UNITS':
+        _on_switch_units(args.data)
+
     elif action == 'GET_TEMPLATES':
         _on_get_templates()
 
@@ -608,7 +754,15 @@ def _on_refresh_request():
     if not design:
         return
 
-    payload = parameter_bridge.build_ui_payload(design)
+    # Use the same fingerprint check as command_execute:
+    # if the design has a fingerprint, it was created with the app → live mode;
+    # otherwise show schema defaults (initial/pre-import mode).
+    fingerprint = parameter_bridge.get_fingerprint(design)
+    if fingerprint is not None:
+        payload = parameter_bridge.build_ui_payload(design)
+    else:
+        payload = parameter_bridge.build_schema_payload(design)
+
     if payload:
         palette = ui.palettes.itemById(PALETTE_ID)
         if palette:
