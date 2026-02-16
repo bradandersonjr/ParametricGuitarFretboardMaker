@@ -10,6 +10,7 @@ and the UI. It uses the parameter schema (parameters.schema.json) to:
 
 import json
 import os
+import re
 import adsk.core
 import adsk.fusion
 
@@ -223,11 +224,13 @@ def edit_param(design: adsk.fusion.Design, old_name: str, new_name: str, descrip
     """
     param = design.userParameters.itemByName(old_name)
     if param is None:
+        futil.log(f'Parameter Bridge: Parameter {old_name!r} not found in design', force_console=True)
         return {'ok': False, 'error': f"Parameter '{old_name}' not found"}
 
     # Check for name conflict only if actually renaming
     if new_name != old_name:
         if design.userParameters.itemByName(new_name) is not None:
+            futil.log(f'Parameter Bridge: Name conflict - {new_name!r} already exists', force_console=True)
             return {'ok': False, 'error': f"A parameter named '{new_name}' already exists"}
 
     try:
@@ -239,11 +242,11 @@ def edit_param(design: adsk.fusion.Design, old_name: str, new_name: str, descrip
         if new_name != old_name:
             param.name = new_name
 
-        futil.log(f'Parameter Bridge: Edited param {old_name!r} -> name={new_name!r} group={group_id!r}')
+        futil.log(f'Parameter Bridge: Edited param {old_name!r} -> name={new_name!r} group={group_id!r} desc={description!r}', force_console=True)
         return {'ok': True, 'error': None}
     except Exception as e:
         err = f'Failed to edit param {old_name}: {e}'
-        futil.log(err, adsk.core.LogLevels.ErrorLogLevel)
+        futil.log(err, adsk.core.LogLevels.ErrorLogLevel, force_console=True)
         return {'ok': False, 'error': err}
 
 
@@ -292,6 +295,8 @@ def get_user_parameters(design: adsk.fusion.Design):
             'unit': p.unit,
             'comment': p.comment or '',
         }
+        if p.name in ['ScaleLengthBass', 'ScaleLengthTreb', 'NutRadius']:
+            futil.log(f'[DEBUG] Parameter {p.name}: expression="{p.expression}", value={p.value}, unit={p.unit}')
 
     futil.log(f'Parameter Bridge: Read {len(result)} user parameter(s) from design')
     return result
@@ -474,6 +479,12 @@ def build_ui_payload(design: adsk.fusion.Design):
                 continue
 
             live = live_params[name]
+
+            # For description: prefer the live parameter's comment (if edited), fall back to schema
+            # Strip the group tag from the comment if present
+            live_description = _group_tag_re().sub('', live['comment']).strip()
+            description = live_description if live_description else param_def.get('description', '')
+
             param_entry = {
                 'name': name,
                 'label': param_def.get('label', name),
@@ -487,7 +498,7 @@ def build_ui_payload(design: adsk.fusion.Design):
                 'maxMetric': param_def.get('maxMetric'),
                 'step': param_def.get('step'),
                 'stepMetric': param_def.get('stepMetric'),
-                'description': param_def.get('description', ''),
+                'description': description,
                 'expression': live['expression'],
                 'value': live['value'],
                 'unit': live['unit'],
@@ -499,6 +510,31 @@ def build_ui_payload(design: adsk.fusion.Design):
 
     # Sort groups by order
     groups.sort(key=lambda g: g['order'])
+
+    # Set unit symbols and convert metric expressions
+    doc_unit = get_document_unit(design) if design is not None else 'in'
+    futil.log(f'[DEBUG] build_ui_payload: doc_unit={doc_unit}')
+    for group in groups:
+        for param in group['parameters']:
+            param['unit'] = get_unit_symbol(param['unitKind'], doc_unit)
+
+            # If document is metric and parameter is a length, convert expression from inches to mm
+            if doc_unit == 'mm' and param['unitKind'] == 'length':
+                expr = param['expression']
+                futil.log(f'[DEBUG] Processing metric param {param["name"]}: expr="{expr}"')
+                # Only convert if expression is a simple number (not a formula or parameter reference)
+                match = re.match(r'^([\d.]+)\s*in\s*$', expr)
+                if match:
+                    # Convert from inches to mm
+                    imperial_val = float(match.group(1))
+                    metric_val = imperial_val * 25.4
+                    param['expression'] = f"{metric_val} {param['unit']}"
+                    param['value'] = metric_val
+                    futil.log(f'[DEBUG]   Converted: {imperial_val} in → {metric_val} mm')
+                else:
+                    futil.log(f'[DEBUG]   No match, keeping as-is')
+                # If expression is a parameter reference or formula, leave it as-is
+                # If it already has mm, leave it as-is
 
     # Find extra params: in design but not in schema (exclude fingerprint parameter)
     extra_names = [name for name in live_params if name not in schema_param_names and name != FINGERPRINT_PARAM]
@@ -541,7 +577,7 @@ def build_ui_payload(design: adsk.fusion.Design):
         'mode': 'live',
         'fingerprint': fingerprint,
         'hasFingerprint': has_fingerprint,
-        'documentUnit': get_document_unit(design),
+        'documentUnit': doc_unit,
     }
 
     futil.log(
@@ -839,22 +875,29 @@ def get_timeline_items(design: adsk.fusion.Design):
     """Get all timeline items with full details for UI display.
 
     Groups include a 'children' list of their member features.
+    Children are populated by get_all_items() which reads them directly
+    from TimelineGroup objects — works even when groups are collapsed.
     """
     items = timeline_manager.get_all_items(design, include_suppressed=True)
+    futil.log(f'parameter_bridge.get_timeline_items: got {len(items)} items from timeline_manager')
     result = []
     for item in items:
         entry = {
             'name': item['name'],
             'type': item['type'],
+            'featureType': item.get('featureType'),
             'suppressed': item['suppressed'],
             'index': item['index'],
         }
         if item['type'] == 'Group':
-            children = timeline_manager.get_group_items(design, item['name'])
+            # Children are already resolved by get_all_items() via
+            # TimelineGroup iteration (works regardless of collapse state).
+            children = item.get('children', [])
             entry['children'] = [
                 {
                     'name': c['name'],
                     'type': c['type'],
+                    'featureType': c.get('featureType'),
                     'suppressed': c['suppressed'],
                     'index': c['index'],
                 }
