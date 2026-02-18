@@ -59,8 +59,10 @@ def get_document_unit(design: adsk.fusion.Design) -> str:
     """
     try:
         units_mgr = design.fusionUnitsManager
-        return units_mgr.defaultLengthUnits
-    except Exception:
+        unit = units_mgr.defaultLengthUnits
+        return unit
+    except Exception as e:
+        futil.log(f'get_document_unit: FAILED ({e}), falling back to "in"')
         return 'in'
 
 
@@ -159,7 +161,6 @@ _GROUP_TAG_RE = None
 def _group_tag_re():
     global _GROUP_TAG_RE
     if _GROUP_TAG_RE is None:
-        import re
         _GROUP_TAG_RE = re.compile(r'\s*\[pgfm-group:([^\]]+)\]')
     return _GROUP_TAG_RE
 
@@ -224,13 +225,13 @@ def edit_param(design: adsk.fusion.Design, old_name: str, new_name: str, descrip
     """
     param = design.userParameters.itemByName(old_name)
     if param is None:
-        futil.log(f'Parameter Bridge: Parameter {old_name!r} not found in design', force_console=True)
+        futil.log(f'Parameter Bridge: Parameter {old_name!r} not found in design')
         return {'ok': False, 'error': f"Parameter '{old_name}' not found"}
 
     # Check for name conflict only if actually renaming
     if new_name != old_name:
         if design.userParameters.itemByName(new_name) is not None:
-            futil.log(f'Parameter Bridge: Name conflict - {new_name!r} already exists', force_console=True)
+            futil.log(f'Parameter Bridge: Name conflict - {new_name!r} already exists')
             return {'ok': False, 'error': f"A parameter named '{new_name}' already exists"}
 
     try:
@@ -242,11 +243,11 @@ def edit_param(design: adsk.fusion.Design, old_name: str, new_name: str, descrip
         if new_name != old_name:
             param.name = new_name
 
-        futil.log(f'Parameter Bridge: Edited param {old_name!r} -> name={new_name!r} group={group_id!r} desc={description!r}', force_console=True)
+        futil.log(f'Parameter Bridge: Edited param {old_name!r} -> name={new_name!r} group={group_id!r} desc={description!r}')
         return {'ok': True, 'error': None}
     except Exception as e:
         err = f'Failed to edit param {old_name}: {e}'
-        futil.log(err, adsk.core.LogLevels.ErrorLogLevel, force_console=True)
+        futil.log(err, adsk.core.LogLevels.ErrorLogLevel)
         return {'ok': False, 'error': err}
 
 
@@ -295,8 +296,6 @@ def get_user_parameters(design: adsk.fusion.Design):
             'unit': p.unit,
             'comment': p.comment or '',
         }
-        if p.name in ['ScaleLengthBass', 'ScaleLengthTreb', 'NutRadius']:
-            futil.log(f'[DEBUG] Parameter {p.name}: expression="{p.expression}", value={p.value}, unit={p.unit}')
 
     futil.log(f'Parameter Bridge: Read {len(result)} user parameter(s) from design')
     return result
@@ -315,12 +314,20 @@ def build_schema_payload(design: adsk.fusion.Design = None):
     Only includes EDITABLE parameters (non-formula-based) to prevent
     accidental overwriting of calculated expressions.
 
+    If design is provided, reads actual parameter values from Fusion
+    and uses those instead of schema defaults, so the baseline reflects
+    what's currently in the file (important for metric documents that
+    already have parameters set).
+
     Returns a payload identical in shape to build_ui_payload(), with
     an added ``mode`` field set to ``"initial"``.
     """
     schema = load_schema()
     if schema is None:
         return None
+
+    # Read existing parameters from design if available
+    live_params = get_user_parameters(design) if design else {}
 
     groups = []
     for group_def in schema.get('groups', []):
@@ -335,17 +342,18 @@ def build_schema_payload(design: adsk.fusion.Design = None):
             if not param_def.get('editable', True):
                 continue
 
-            default_expr = param_def.get('default', '')
+            param_name = param_def['name']
+            # Prefer actual Fusion expression if it exists, fall back to schema default
+            if param_name in live_params:
+                default_expr = live_params[param_name]['expression']
+            else:
+                default_expr = param_def.get('default', '')
+
             # Try to convert default to numeric value for display
             try:
                 numeric_value = float(default_expr) if default_expr else None
             except (ValueError, TypeError):
                 numeric_value = None
-
-            # Debug: log what we're extracting for the first param
-            if param_def['name'] == 'ScaleLengthBass':
-                print(f"[DEBUG] ScaleLengthBass param_def: {param_def}")
-                print(f"[DEBUG] defaultMetric from param_def: {param_def.get('defaultMetric')}")
 
             group['parameters'].append({
                 'name': param_def['name'],
@@ -384,8 +392,11 @@ def build_schema_payload(design: adsk.fusion.Design = None):
                     param['value'] = float(metric_default)
                 except (ValueError, TypeError):
                     pass
-                param['expression'] = f"{metric_default} {param['unit']}"
-                param['default'] = param['expression']
+                # Only override expression if we're using the schema default, not a live value
+                if param['name'] not in live_params:
+                    # Store just the numeric part in expression (frontend reconstructs with unit when needed)
+                    param['expression'] = metric_default
+                    param['default'] = metric_default
 
     payload = {
         'schemaVersion': schema.get('schemaVersion', 'unknown'),
@@ -513,7 +524,6 @@ def build_ui_payload(design: adsk.fusion.Design):
 
     # Set unit symbols and convert metric expressions
     doc_unit = get_document_unit(design) if design is not None else 'in'
-    futil.log(f'[DEBUG] build_ui_payload: doc_unit={doc_unit}')
     for group in groups:
         for param in group['parameters']:
             param['unit'] = get_unit_symbol(param['unitKind'], doc_unit)
@@ -521,20 +531,12 @@ def build_ui_payload(design: adsk.fusion.Design):
             # If document is metric and parameter is a length, convert expression from inches to mm
             if doc_unit == 'mm' and param['unitKind'] == 'length':
                 expr = param['expression']
-                futil.log(f'[DEBUG] Processing metric param {param["name"]}: expr="{expr}"')
-                # Only convert if expression is a simple number (not a formula or parameter reference)
                 match = re.match(r'^([\d.]+)\s*in\s*$', expr)
                 if match:
-                    # Convert from inches to mm
                     imperial_val = float(match.group(1))
                     metric_val = imperial_val * 25.4
                     param['expression'] = f"{metric_val} {param['unit']}"
                     param['value'] = metric_val
-                    futil.log(f'[DEBUG]   Converted: {imperial_val} in → {metric_val} mm')
-                else:
-                    futil.log(f'[DEBUG]   No match, keeping as-is')
-                # If expression is a parameter reference or formula, leave it as-is
-                # If it already has mm, leave it as-is
 
     # Find extra params: in design but not in schema (exclude fingerprint parameter)
     extra_names = [name for name in live_params if name not in schema_param_names and name != FINGERPRINT_PARAM]
@@ -653,7 +655,6 @@ def _extract_numeric_value(expression_str):
     Returns:
         float or None
     """
-    import re
     match = re.search(r'^([\d.-]+)', expression_str.strip())
     if match:
         try:
@@ -726,7 +727,6 @@ def _extract_unit_from_expression(expression: str) -> str:
         "45 deg"  -> "deg"
         "6"       -> ""
     """
-    import re
     match = re.search(r'\b(in|mm|cm|deg)\s*$', expression.strip())
     return match.group(1) if match else ''
 
@@ -871,19 +871,35 @@ def apply_parameters(design: adsk.fusion.Design, param_values: dict, creates: li
 # Timeline Management (delegates to timeline_manager)
 # ═══════════════════════════════════════════════════════════════════
 
-def get_timeline_items(design: adsk.fusion.Design):
-    """Get all timeline items with full details for UI display.
+# Timeline groups surfaced in the Features Drawer.
+# Matched by prefix so "Fret Markers" matches "Fret Markers:1" etc.
+_FEATURES_DRAWER_GROUPS = ["Fret Markers", "Nut Slot", "Fret Slot Cuts"]
 
+
+def _matches_drawer_group(name: str) -> bool:
+    """Return True if the item name (stripped) matches any allowed group prefix."""
+    stripped = name.strip()
+    for group in _FEATURES_DRAWER_GROUPS:
+        if stripped == group or stripped.startswith(group + ':'):
+            return True
+    return False
+
+
+def get_timeline_items(design: adsk.fusion.Design):
+    """Get curated timeline items for the Features Drawer.
+
+    Only returns items whose name matches a prefix in _FEATURES_DRAWER_GROUPS.
     Groups include a 'children' list of their member features.
     Children are populated by get_all_items() which reads them directly
     from TimelineGroup objects — works even when groups are collapsed.
     """
     items = timeline_manager.get_all_items(design, include_suppressed=True)
-    futil.log(f'parameter_bridge.get_timeline_items: got {len(items)} items from timeline_manager')
     result = []
     for item in items:
+        if not _matches_drawer_group(item['name']):
+            continue
         entry = {
-            'name': item['name'],
+            'name': item['name'].strip(),
             'type': item['type'],
             'featureType': item.get('featureType'),
             'suppressed': item['suppressed'],
@@ -895,7 +911,7 @@ def get_timeline_items(design: adsk.fusion.Design):
             children = item.get('children', [])
             entry['children'] = [
                 {
-                    'name': c['name'],
+                    'name': c['name'].strip(),
                     'type': c['type'],
                     'featureType': c.get('featureType'),
                     'suppressed': c['suppressed'],
@@ -997,7 +1013,92 @@ def unsuppress_group_with_contents(design: adsk.fusion.Design, group_name: str) 
     }
 
 
+def remap_hole_to_selection_set(
+    design: adsk.fusion.Design,
+    hole_name: str,
+    selection_set_name: str,
+) -> dict:
+    """Remap an existing HoleFeature's position inputs to sketch points in a Selection Set.
+
+    Rolls the timeline marker to immediately before the hole feature, calls
+    HoleFeature.setPositionBySketchPoints() with the entities from the named
+    Selection Set, then restores the marker to the end.
+
+    Returns:
+        dict: { 'success': bool, 'message': str }
+    """
+    timeline = design.timeline
+    timeline_rolled = False
+    try:
+        # ── 1. Find the hole feature ───────────────────────────────
+        item_dict = timeline_manager.find_item_by_name(design, hole_name)
+        if not item_dict:
+            return {'success': False, 'message': f'Hole feature "{hole_name}" not found in timeline'}
+
+        timeline_obj = item_dict['object']  # TimelineObject
+        entity = timeline_obj.entity
+        if not entity:
+            return {'success': False, 'message': f'Timeline item "{hole_name}" has no entity (may be a group)'}
+
+        hole_feature = adsk.fusion.HoleFeature.cast(entity)
+        if not hole_feature:
+            return {'success': False, 'message': f'Timeline item "{hole_name}" is not a HoleFeature'}
+
+        # ── 2. Find the selection set ──────────────────────────────
+        sel_set = design.selectionSets.itemByName(selection_set_name)
+        if not sel_set:
+            return {'success': False, 'message': f'Selection set "{selection_set_name}" not found'}
+
+        entity_count = sel_set.entities.count
+        if entity_count == 0:
+            return {'success': False, 'message': f'Selection set "{selection_set_name}" is empty'}
+
+        # ── 3. Roll timeline to immediately before the hole ────────
+        timeline_obj.rollTo()
+        timeline_rolled = True
+        futil.log(f'parameter_bridge.remap_hole: rolled timeline before "{hole_name}"',
+                  force_console=True)
+
+        # ── 4. Build ObjectCollection from selection set points ────
+        pts = adsk.core.ObjectCollection.create()
+        for i in range(entity_count):
+            pts.add(sel_set.entities.item(i))
+
+        # ── 5. Remap hole positions ────────────────────────────────
+        hole_feature.setPositionBySketchPoints(pts)
+        futil.log(f'parameter_bridge.remap_hole: setPositionBySketchPoints with {entity_count} point(s)',
+                  force_console=True)
+
+        return {'success': True, 'message': f'Remapped "{hole_name}" to {entity_count} point(s) from "{selection_set_name}"'}
+
+    except Exception as e:
+        futil.log(f'parameter_bridge.remap_hole: error: {e}', force_console=True)
+        return {'success': False, 'message': str(e)}
+
+    finally:
+        # Always restore timeline to end, even if an error occurred mid-operation
+        if timeline_rolled:
+            try:
+                timeline.moveToEnd()
+                futil.log('parameter_bridge.remap_hole: timeline restored to end', force_console=True)
+            except Exception as restore_err:
+                futil.log(f'parameter_bridge.remap_hole: failed to restore timeline: {restore_err}',
+                          force_console=True)
+
+
 def get_timeline_summary(design: adsk.fusion.Design) -> dict:
-    """Get a summary of the timeline state."""
-    return timeline_manager.get_timeline_summary(design)
+    """Get a summary scoped to the curated Features Drawer groups."""
+    curated = get_timeline_items(design)
+    total = len(curated)
+    active = sum(1 for item in curated if not item['suppressed'])
+    suppressed = total - active
+    groups = sum(1 for item in curated if item['type'] == 'Group')
+    features = sum(1 for item in curated if item['type'] == 'Feature')
+    return {
+        'total_items': total,
+        'active_count': active,
+        'suppressed_count': suppressed,
+        'group_count': groups,
+        'feature_count': features,
+    }
 

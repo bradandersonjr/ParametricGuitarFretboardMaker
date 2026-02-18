@@ -198,11 +198,13 @@ export function ReportsPage({ payload }: { payload: ModelPayload | null }) {
           <ReportSection title={`String Layout (${report.stringCount} strings)`} icon={Guitar}>
             <div className="space-y-1">
               {report.strings
-                .filter((s) => s.gauge > 0)
+                .slice(0, report.stringCount)
                 .map((s) => (
                   <div key={s.number} className="flex items-center justify-between py-0.5">
                     <span className="text-xs text-muted-foreground">String {s.number}</span>
-                    <span className="text-xs tabular-nums font-medium">{s.gauge.toFixed(precision)} {documentUnit}</span>
+                    <span className="text-xs tabular-nums font-medium">
+                      {s.gauge > 0 ? `${s.gauge.toFixed(precision)} ${documentUnit}` : "—"}
+                    </span>
                   </div>
                 ))}
               <div className="border-t border-border/50 my-1.5" />

@@ -17,5 +17,14 @@ export default defineConfig({
   build: {
     outDir: '../ui_dist',
     emptyOutDir: true,
+    chunkSizeWarningLimit: 1000,
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor': ['react', 'react-dom'],
+          'ui-components': ['lucide-react'],
+        },
+      },
+    },
   },
 })

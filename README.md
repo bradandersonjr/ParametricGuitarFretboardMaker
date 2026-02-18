@@ -1,6 +1,6 @@
 # Parametric Guitar Fretboard Maker
 
-A specialized Autodesk Fusion 360 add-in for designing custom guitar fretboards with precise parameter control. Create perfectly tailored fretboards based on your exact specifications—scale length, fret count, radius, and more.
+A specialized Autodesk Fusion add-in for designing custom guitar fretboards with precise parameter control. Create perfectly tailored fretboards based on your exact specifications—scale length, fret count, radius, and more.
 
 ## Features
 
@@ -43,7 +43,7 @@ ParametricGuitarFretboardMaker/
 ├── ParametricGuitarFretboardMaker.manifest
 ├── config.py                            # Global configuration
 ├── commands/
-│   └── guitarMaker/
+│   └── fretboardMaker/
 │       ├── entry.py                     # Main command logic & event handlers
 │       └── resources/                   # Toolbar button icons
 ├── lib/
@@ -86,7 +86,7 @@ ParametricGuitarFretboardMaker/
 - **Python 3**: Fusion add-in scripting
 - **React + TypeScript**: Palette UI
 - **Vite**: UI build tooling
-- **Fusion 360 API**: Design automation and parameter management
+- **Autodesk Fusion API**: Design automation and parameter management
 
 ## Development
 

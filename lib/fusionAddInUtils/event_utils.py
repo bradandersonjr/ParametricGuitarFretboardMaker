@@ -82,7 +82,7 @@ def _define_handler(handler_type, callback, name: str = None):
         def notify(self, args):
             try:
                 callback(args)
-            except:
+            except Exception:
                 handle_error(name)
 
     return Handler

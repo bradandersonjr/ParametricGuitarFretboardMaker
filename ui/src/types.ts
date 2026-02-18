@@ -1,5 +1,5 @@
 /** Page identifiers for sidebar navigation */
-export type PageId = "parameters" | "templates" | "reports" | "changelog" | "help" | "community" | "support" | "about"
+export type PageId = "parameters" | "templates" | "reports" | "changelog" | "share" | "help" | "community" | "support" | "about"
 
 /** Matches the payload shape from parameter_bridge.build_ui_payload() */
 
@@ -37,7 +37,7 @@ export interface ModelPayload {
   missing: string[]
   extra: string[]
   extraParams?: Parameter[]
-  mode?: "initial" | "live" | "template"
+  mode?: "initial" | "live" | "template" | "imported"
   fingerprint?: string
   hasFingerprint?: boolean
   documentUnit?: string
@@ -72,6 +72,8 @@ export interface PendingParam {
 export interface TimelineItem {
   name: string
   type: "Feature" | "Group"
+  /** Fine-grained feature category from Fusion's objectType, e.g. "Sketch", "Extrude", "Fillet" */
+  featureType?: string | null
   suppressed: boolean
   index: number
   children?: TimelineItem[]

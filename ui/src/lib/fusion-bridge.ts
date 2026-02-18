@@ -21,8 +21,8 @@ declare global {
   }
 }
 
-export type IncomingAction = "PUSH_MODEL_STATE" | "PUSH_TEMPLATES" | "COMPUTING" | "response" | "PUSH_TIMELINE_ITEMS" | "PUSH_TIMELINE_SUMMARY" | "TIMELINE_OPERATION_RESULT"
-export type OutgoingAction = "ready" | "GET_MODEL_STATE" | "APPLY_PARAMS" | "cancel" | "OPEN_URL" | "GET_TEMPLATES" | "LOAD_TEMPLATE" | "SAVE_TEMPLATE" | "DELETE_TEMPLATE" | "OPEN_TEMPLATES_FOLDER" | "SWITCH_UNITS" | "GET_TIMELINE_ITEMS" | "GET_TIMELINE_SUMMARY" | "APPLY_TIMELINE_CHANGES" | "SET_PARAM_CATEGORY" | "EDIT_PARAM" | "DELETE_PARAM"
+export type IncomingAction = "PUSH_MODEL_STATE" | "PUSH_TEMPLATES" | "COMPUTING" | "response" | "PUSH_TIMELINE_ITEMS" | "PUSH_TIMELINE_SUMMARY" | "TIMELINE_OPERATION_RESULT" | "HOLE_POSITION_RESULT"
+export type OutgoingAction = "ready" | "GET_MODEL_STATE" | "APPLY_PARAMS" | "cancel" | "OPEN_URL" | "GET_TEMPLATES" | "LOAD_TEMPLATE" | "IMPORT_SHARE" | "SAVE_TEMPLATE" | "DELETE_TEMPLATE" | "OPEN_TEMPLATES_FOLDER" | "GET_TIMELINE_ITEMS" | "GET_TIMELINE_SUMMARY" | "APPLY_TIMELINE_CHANGES" | "SET_PARAM_CATEGORY" | "EDIT_PARAM" | "DELETE_PARAM" | "REMAP_HOLE_TO_SELECTION_SET"
 
 type MessageHandler = (action: string, dataJson: string) => void
 
@@ -212,6 +212,11 @@ function buildDevTemplatePayload() {
 export function signalReady() {
   if (_isFusion()) {
     sendToPython("ready")
+    // Also send GET_MODEL_STATE after a short delay as a fallback.
+    // On a right-click WebView reload the "ready" signal can be lost
+    // (Fusion's incomingFromHTML handler isn't always wired in time),
+    // but subsequent messages go through fine.
+    setTimeout(() => sendToPython("GET_MODEL_STATE"), 300)
   } else {
     setTimeout(() => {
       if (handler) {

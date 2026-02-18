@@ -10,7 +10,6 @@ interface TemplatesPageProps {
   payload: ModelPayload | null
   templateList: TemplateListPayload | null
   onTemplateLoaded: () => void
-  documentUnit: string
 }
 
 function getDisplayParams(params: Record<string, string>, documentUnit?: string) {
@@ -23,13 +22,12 @@ function getDisplayParams(params: Record<string, string>, documentUnit?: string)
     ScaleLengthTreb: "Treble scale",
     NeutralFret: "Neutral fret",
   }
-  // Length params that have a _metric variant in the preset file
-  const lengthKeys = new Set(["ScaleLengthBass", "ScaleLengthTreb"])
   return keys
     .filter((k) => params[k] !== undefined)
     .map((k) => {
+      // Use _metric variant automatically if available and document is metric
       const metricKey = `${k}_metric`
-      const value = isMetric && lengthKeys.has(k) && params[metricKey] !== undefined
+      const value = isMetric && params[metricKey] !== undefined
         ? params[metricKey]
         : params[k]
       return `${labels[k]}: ${value}`
@@ -162,9 +160,10 @@ function CollapsibleSection({
   )
 }
 
-export function TemplatesPage({ payload, templateList, onTemplateLoaded, documentUnit }: TemplatesPageProps) {
+export function TemplatesPage({ payload, templateList, onTemplateLoaded }: TemplatesPageProps) {
   const presets = templateList?.presets ?? []
   const userTemplates = templateList?.userTemplates ?? []
+  const documentUnit = payload?.documentUnit
   const [saving, setSaving] = useState(false)
   const [saveName, setSaveName] = useState("")
   const [saveDesc, setSaveDesc] = useState("")
@@ -362,6 +361,7 @@ export function TemplatesPage({ payload, templateList, onTemplateLoaded, documen
                     template={t}
                     onLoad={handleLoad}
                     onDelete={handleDelete}
+                    documentUnit={documentUnit}
                   />
                 ))}
               </div>

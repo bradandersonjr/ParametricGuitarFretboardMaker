@@ -1,11 +1,11 @@
 # Commands package for Parametric Guitar: Fretboard Maker
 # Each command module provides start() and stop() functions.
 
-from .guitarMaker import entry as guitarMaker
+from .fretboardMaker import entry as fretboardMaker
 
 # List of all command modules. Fusion calls start() and stop() on each.
 commands = [
-    guitarMaker,
+    fretboardMaker,
 ]
 
 

@@ -13,16 +13,37 @@ export function ChangelogPage() {
       <ScrollArea className="flex-1">
         <div className="p-4 space-y-6">
 
+          {/* Version 0.2.0 */}
+          <div>
+            <div className="flex items-baseline gap-2 mb-2">
+              <h2 className="text-sm font-semibold font-heading">v0.2.0</h2>
+              <span className="text-xs text-muted-foreground">Current</span>
+            </div>
+            <p className="text-xs text-muted-foreground mb-2">Units, validation, and custom categories</p>
+            <ul className="text-xs text-muted-foreground space-y-1 ml-4 list-disc list-inside">
+              <li>Unified imperial/metric unit system with schema-stored dual values</li>
+              <li>Input validation with min/max limits enforced in UI and backend</li>
+              <li>Custom parameter categories: create, delete, and assign user-defined groups</li>
+              <li>Auto-apply new parameters immediately on creation</li>
+              <li>Batched undo/redo treats entire edits as single actions</li>
+              <li>History popover on undo/redo buttons showing past/future changes</li>
+              <li>Unit indicator badge and fretboard detection indicator</li>
+              <li>Unified preset files with dual imperial/metric values</li>
+              <li>Smart template loading with unit-correct value selection</li>
+              <li>Added a Share page to easily share designs with others via a text string</li>
+            </ul>
+          </div>
+
           {/* Version 0.1.0 */}
           <div>
             <div className="flex items-baseline gap-2 mb-2">
               <h2 className="text-sm font-semibold font-heading">v0.1.0</h2>
-              <span className="text-xs text-muted-foreground">Current</span>
+              <span className="text-xs text-muted-foreground">2026-02-13</span>
             </div>
             <p className="text-xs text-muted-foreground mb-2">Initial release</p>
             <ul className="text-xs text-muted-foreground space-y-1 ml-4 list-disc list-inside">
               <li>Parameter configuration interface with grouped controls</li>
-              <li>Apply parameters directly to a live Fusion 360 design</li>
+              <li>Apply parameters directly to a live Autodesk Fusion design</li>
               <li>Undo/redo support and parameter search</li>
               <li>Reports page with detailed fretboard specifications</li>
               <li>Templates system for saving and loading user presets</li>
